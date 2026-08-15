@@ -1,0 +1,6 @@
+{
+  "name": "Periodic Table Explorer",
+  "description": "An interactive, 3D periodic table application featuring atomic structure visualizers, molecule builder, reaction simulator, periodic trends, quizzes, and AI chemistry tutor.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
