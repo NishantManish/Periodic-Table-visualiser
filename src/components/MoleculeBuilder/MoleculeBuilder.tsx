@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { MOLECULES_LIBRARY } from '../../data/moleculesData';
 import { Molecule } from '../../types';
 import {
@@ -8,46 +8,39 @@ import {
   Plus,
   Trash2,
   RefreshCw,
-  Zap,
-  Info,
   RotateCcw,
-  Move,
   Link as LinkIcon,
   MousePointer,
-  HelpCircle,
-  Eye,
-  Check,
-  Award,
-  Layers,
-  Scale,
+  CheckCircle2,
+  AlertTriangle,
   Atom as AtomIcon,
-  Copy,
-  Download,
 } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 
-// Atomic Data Dictionary for Builder Palette
+// Atomic Data Dictionary for Builder Palette with strict valency rules
 interface PaletteElement {
   symbol: string;
   name: string;
   atomicMass: number;
   electronegativity: number;
   valenceElectrons: number;
+  standardValency: number;
+  maxBonds: number; // Octet or hypervalent d-orbital limit
   color: string;
   radius: number;
 }
 
 const PALETTE_ELEMENTS: Record<string, PaletteElement> = {
-  H: { symbol: 'H', name: 'Hydrogen', atomicMass: 1.008, electronegativity: 2.20, valenceElectrons: 1, color: '#ffffff', radius: 24 },
-  C: { symbol: 'C', name: 'Carbon', atomicMass: 12.011, electronegativity: 2.55, valenceElectrons: 4, color: '#334155', radius: 36 },
-  N: { symbol: 'N', name: 'Nitrogen', atomicMass: 14.007, electronegativity: 3.04, valenceElectrons: 5, color: '#3b82f6', radius: 34 },
-  O: { symbol: 'O', name: 'Oxygen', atomicMass: 15.999, electronegativity: 3.44, valenceElectrons: 6, color: '#ef4444', radius: 34 },
-  F: { symbol: 'F', name: 'Fluorine', atomicMass: 18.998, electronegativity: 3.98, valenceElectrons: 7, color: '#a855f7', radius: 30 },
-  Na: { symbol: 'Na', name: 'Sodium', atomicMass: 22.990, electronegativity: 0.93, valenceElectrons: 1, color: '#f59e0b', radius: 42 },
-  P: { symbol: 'P', name: 'Phosphorus', atomicMass: 30.974, electronegativity: 2.19, valenceElectrons: 5, color: '#f97316', radius: 38 },
-  S: { symbol: 'S', name: 'Sulfur', atomicMass: 32.06, electronegativity: 2.58, valenceElectrons: 6, color: '#eab308', radius: 40 },
-  Cl: { symbol: 'Cl', name: 'Chlorine', atomicMass: 35.45, electronegativity: 3.16, valenceElectrons: 7, color: '#22c55e', radius: 38 },
-  Br: { symbol: 'Br', name: 'Bromine', atomicMass: 79.904, electronegativity: 2.96, valenceElectrons: 7, color: '#9a3412', radius: 42 },
+  H: { symbol: 'H', name: 'Hydrogen', atomicMass: 1.008, electronegativity: 2.20, valenceElectrons: 1, standardValency: 1, maxBonds: 1, color: '#ffffff', radius: 24 },
+  C: { symbol: 'C', name: 'Carbon', atomicMass: 12.011, electronegativity: 2.55, valenceElectrons: 4, standardValency: 4, maxBonds: 4, color: '#334155', radius: 36 },
+  N: { symbol: 'N', name: 'Nitrogen', atomicMass: 14.007, electronegativity: 3.04, valenceElectrons: 5, standardValency: 3, maxBonds: 4, color: '#3b82f6', radius: 34 },
+  O: { symbol: 'O', name: 'Oxygen', atomicMass: 15.999, electronegativity: 3.44, valenceElectrons: 6, standardValency: 2, maxBonds: 3, color: '#ef4444', radius: 34 },
+  F: { symbol: 'F', name: 'Fluorine', atomicMass: 18.998, electronegativity: 3.98, valenceElectrons: 7, standardValency: 1, maxBonds: 1, color: '#a855f7', radius: 30 },
+  Na: { symbol: 'Na', name: 'Sodium', atomicMass: 22.990, electronegativity: 0.93, valenceElectrons: 1, standardValency: 1, maxBonds: 1, color: '#f59e0b', radius: 42 },
+  P: { symbol: 'P', name: 'Phosphorus', atomicMass: 30.974, electronegativity: 2.19, valenceElectrons: 5, standardValency: 3, maxBonds: 5, color: '#f97316', radius: 38 },
+  S: { symbol: 'S', name: 'Sulfur', atomicMass: 32.06, electronegativity: 2.58, valenceElectrons: 6, standardValency: 2, maxBonds: 6, color: '#eab308', radius: 40 },
+  Cl: { symbol: 'Cl', name: 'Chlorine', atomicMass: 35.45, electronegativity: 3.16, valenceElectrons: 7, standardValency: 1, maxBonds: 7, color: '#22c55e', radius: 38 },
+  Br: { symbol: 'Br', name: 'Bromine', atomicMass: 79.904, electronegativity: 2.96, valenceElectrons: 7, standardValency: 1, maxBonds: 5, color: '#9a3412', radius: 42 },
 };
 
 // Custom Built Canvas Node & Edge types
@@ -68,7 +61,7 @@ export interface BuilderBondEdge {
 export const MoleculeBuilder: React.FC = () => {
   const { unlockAchievement } = useAppStore();
 
-  // Mode Selection: Preset Preset vs Custom Sandbox
+  // Mode Selection: Preset vs Custom Sandbox
   const [activeTab, setActiveTab] = useState<'custom-builder' | '3d-library'>('custom-builder');
 
   // Preset 3D state
@@ -78,9 +71,9 @@ export const MoleculeBuilder: React.FC = () => {
 
   // Custom Drag-and-Drop Canvas State
   const [builderAtoms, setBuilderAtoms] = useState<BuilderAtomNode[]>([
-    { id: 'atom-0', symbol: 'O', x: 220, y: 180 },
-    { id: 'atom-1', symbol: 'H', x: 130, y: 220 },
-    { id: 'atom-2', symbol: 'H', x: 310, y: 220 },
+    { id: 'atom-0', symbol: 'O', x: 260, y: 190 },
+    { id: 'atom-1', symbol: 'H', x: 160, y: 245 },
+    { id: 'atom-2', symbol: 'H', x: 360, y: 245 },
   ]);
 
   const [builderBonds, setBuilderBonds] = useState<BuilderBondEdge[]>([
@@ -92,12 +85,23 @@ export const MoleculeBuilder: React.FC = () => {
   const [toolMode, setToolMode] = useState<'select' | 'bond' | 'erase'>('select');
   const [selectedBondOrder, setSelectedBondOrder] = useState<1 | 2 | 3>(1);
   const [bondSourceAtomId, setBondSourceAtomId] = useState<string | null>(null);
+  const [valencyWarning, setValencyWarning] = useState<string | null>(null);
 
   // Dragging atom state
   const [draggingAtomId, setDraggingAtomId] = useState<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
 
-  // --- AUTOMATIC MOLECULAR PREDICTOR ENGINE ---
+  // Calculate bond count per atom ID
+  const atomBondCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    builderBonds.forEach((b) => {
+      counts[b.sourceId] = (counts[b.sourceId] || 0) + b.order;
+      counts[b.targetId] = (counts[b.targetId] || 0) + b.order;
+    });
+    return counts;
+  }, [builderBonds]);
+
+  // --- AUTOMATIC MOLECULAR PREDICTOR ENGINE (VSEPR AXmEn + Octet + Formal Charge) ---
   const predictedData = useMemo(() => {
     if (builderAtoms.length === 0) {
       return {
@@ -105,6 +109,7 @@ export const MoleculeBuilder: React.FC = () => {
         molecularWeight: 0,
         bondType: 'N/A',
         geometry: 'N/A',
+        vseprNotation: 'N/A',
         bondAngle: 'N/A',
         hybridization: 'N/A',
         polarity: 'N/A',
@@ -113,10 +118,14 @@ export const MoleculeBuilder: React.FC = () => {
         centralAtomSymbol: 'None',
         stericNumber: 0,
         lonePairsOnCentral: 0,
+        formalChargeCentral: 0,
+        valencyStatus: 'Add atoms to begin',
+        isOctetValid: true,
+        centralNeighborsList: [] as { symbol: string; order: number }[],
       };
     }
 
-    // 1. Formula Calculation (Hill System: C first, then H, then alphabetical)
+    // 1. Formula Calculation (Hill System: C first, then H, then alphabetical; or Electronegativity order for inorganic binary)
     const counts: Record<string, number> = {};
     let mw = 0;
     let totalValence = 0;
@@ -131,7 +140,6 @@ export const MoleculeBuilder: React.FC = () => {
     let formulaStr = '';
     const symbols = Object.keys(counts);
 
-    // Hill order logic
     if (counts['C']) {
       formulaStr += `C${counts['C'] > 1 ? counts['C'] : ''}`;
       if (counts['H']) {
@@ -144,34 +152,35 @@ export const MoleculeBuilder: React.FC = () => {
           formulaStr += `${s}${counts[s] > 1 ? counts[s] : ''}`;
         });
     } else {
+      // Sort by electronegativity ascending (e.g. NaCl, H2O, NH3, SO2)
       symbols
-        .sort()
+        .sort((a, b) => {
+          const enA = PALETTE_ELEMENTS[a]?.electronegativity || 2.2;
+          const enB = PALETTE_ELEMENTS[b]?.electronegativity || 2.2;
+          return enA - enB;
+        })
         .forEach((s) => {
           formulaStr += `${s}${counts[s] > 1 ? counts[s] : ''}`;
         });
     }
 
-    // Convert numbers in formulaStr to subscript unicode
     const subscriptMap: Record<string, string> = {
       '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
       '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
     };
     const formattedFormula = formulaStr.replace(/\d/g, (d) => subscriptMap[d] || d);
 
-    // 2. Identify Central Atom (atom connected to the most bonds, or lowest electronegativity non-H)
-    const bondCounts: Record<string, number> = {};
-    builderBonds.forEach((b) => {
-      bondCounts[b.sourceId] = (bondCounts[b.sourceId] || 0) + b.order;
-      bondCounts[b.targetId] = (bondCounts[b.targetId] || 0) + b.order;
-    });
-
+    // 2. Identify Central Atom (prefer non-H atom with most bonds, then lowest electronegativity)
     let centralAtom = builderAtoms[0];
-    let maxBonds = -1;
+    let bestScore = -999;
 
     builderAtoms.forEach((a) => {
-      const bCount = bondCounts[a.id] || 0;
-      if (bCount > maxBonds) {
-        maxBonds = bCount;
+      const bCount = atomBondCounts[a.id] || 0;
+      const el = PALETTE_ELEMENTS[a.symbol] || PALETTE_ELEMENTS['H'];
+      const nonHBonus = a.symbol !== 'H' ? 50 : 0;
+      const score = bCount * 20 + nonHBonus + (4.5 - el.electronegativity) * 5;
+      if (score > bestScore) {
+        bestScore = score;
         centralAtom = a;
       }
     });
@@ -189,101 +198,173 @@ export const MoleculeBuilder: React.FC = () => {
       }
     });
 
-    let predictedBondType = 'Covalent';
-    if (maxEnDiff > 1.7) predictedBondType = 'Ionic';
+    let predictedBondType = 'Nonpolar Covalent';
+    if (builderBonds.length === 0) predictedBondType = 'Unbonded Atoms';
+    else if (maxEnDiff > 1.7) predictedBondType = 'Ionic (ΔEN > 1.7)';
     else if (maxEnDiff >= 0.4) predictedBondType = 'Polar Covalent';
-    else predictedBondType = 'Nonpolar Covalent';
 
-    // 4. VSEPR Geometry Calculation
+    // 4. VSEPR AXmEn Geometry & Formal Charge Calculation
     const centralEl = PALETTE_ELEMENTS[centralAtom.symbol] || PALETTE_ELEMENTS['C'];
 
-    // Number of bonded atoms to central atom (distinct neighbors)
-    const centralNeighbors = builderBonds
-      .filter((b) => b.sourceId === centralAtom.id || b.targetId === centralAtom.id)
-      .map((b) => (b.sourceId === centralAtom.id ? b.targetId : b.sourceId));
-    const uniqueNeighborCount = new Set(centralNeighbors).size;
+    const centralAttachedBonds = builderBonds.filter(
+      (b) => b.sourceId === centralAtom.id || b.targetId === centralAtom.id
+    );
+    const centralNeighborsList = centralAttachedBonds.map((b) => {
+      const neighborId = b.sourceId === centralAtom.id ? b.targetId : b.sourceId;
+      const neighborAtom = builderAtoms.find((a) => a.id === neighborId);
+      return {
+        symbol: neighborAtom?.symbol || 'X',
+        order: b.order,
+      };
+    });
 
-    // Total shared electrons on central atom
-    const totalSharedOnCentral = bondCounts[centralAtom.id] || 0;
-    const lonePairsOnCentral = Math.max(0, Math.floor((centralEl.valenceElectrons - totalSharedOnCentral) / 2));
+    // m = number of bonded atoms (sigma domains)
+    const m = centralNeighborsList.length;
+    // B = total bond order sum on central atom
+    const totalBondOrderCentral = atomBondCounts[centralAtom.id] || 0;
+    // Non-bonding electrons remaining on central atom
+    const nonBondingElectrons = Math.max(0, centralEl.valenceElectrons - totalBondOrderCentral);
+    // n = lone pairs on central atom
+    const n = Math.floor(nonBondingElectrons / 2);
 
-    const stericNumber = uniqueNeighborCount + lonePairsOnCentral;
+    const stericNumber = m + n;
+    const vseprNotation = m > 0 ? `AX${m > 1 ? subscriptMap[String(m)] : ''}${n > 0 ? `E${n > 1 ? subscriptMap[String(n)] : ''}` : ''}` : 'Isolated Atom';
 
-    let geometry = 'Linear';
-    let bondAngle = '180°';
-    let hybridization = 'sp';
+    // Formal Charge on central atom: FC = V - N_nonbonding - B_bonds
+    const formalChargeCentral = centralEl.valenceElectrons - n * 2 - totalBondOrderCentral;
+
+    // Check if all terminal substituent atoms around central are identical (for dipole cancellation)
+    const neighborSymbols = centralNeighborsList.map((nb) => nb.symbol);
+    const allSubstituentsIdentical =
+      neighborSymbols.length > 0 && neighborSymbols.every((sym) => sym === neighborSymbols[0]);
+
+    let geometry = 'Isolated Atom';
+    let bondAngle = 'N/A';
+    let hybridization = 'Un-hybridized';
     let polarity = 'Nonpolar';
 
-    if (uniqueNeighborCount === 1) {
-      geometry = 'Linear';
-      bondAngle = '180°';
-      hybridization = 'sp';
-      polarity = maxEnDiff > 0.4 ? 'Polar' : 'Nonpolar';
-    } else if (stericNumber === 2) {
-      geometry = 'Linear';
-      bondAngle = '180°';
-      hybridization = 'sp';
+    if (builderAtoms.length === 1 || m === 0) {
+      geometry = 'Monoatomic / Unbonded';
+      bondAngle = 'N/A';
+      hybridization = 'None';
       polarity = 'Nonpolar';
+    } else if (m === 1) {
+      geometry = 'Linear (Diatomic)';
+      bondAngle = '180°';
+      hybridization = stericNumber === 2 ? 'sp' : stericNumber === 3 ? 'sp²' : 'sp³';
+      polarity = maxEnDiff >= 0.4 ? 'Polar' : 'Nonpolar';
+    } else if (stericNumber === 2) {
+      // AX2
+      geometry = 'Linear';
+      bondAngle = '180°';
+      hybridization = 'sp';
+      polarity = allSubstituentsIdentical ? 'Nonpolar' : 'Polar';
     } else if (stericNumber === 3) {
-      if (lonePairsOnCentral === 1) {
-        geometry = 'Bent';
-        bondAngle = '~118°';
-        hybridization = 'sp²';
-        polarity = 'Polar';
-      } else {
+      hybridization = 'sp²';
+      if (n === 0) {
         geometry = 'Trigonal Planar';
         bondAngle = '120°';
-        hybridization = 'sp²';
-        polarity = 'Nonpolar';
+        polarity = allSubstituentsIdentical && maxEnDiff < 1.7 ? 'Nonpolar' : 'Polar';
+      } else {
+        // AX2E
+        geometry = 'Bent (Angular)';
+        bondAngle = '~118°';
+        polarity = 'Polar';
       }
     } else if (stericNumber === 4) {
-      if (lonePairsOnCentral === 2) {
-        geometry = 'Bent';
-        bondAngle = '104.5°';
-        hybridization = 'sp³';
-        polarity = 'Polar';
-      } else if (lonePairsOnCentral === 1) {
-        geometry = 'Trigonal Pyramidal';
-        bondAngle = '107°';
-        hybridization = 'sp³';
-        polarity = 'Polar';
-      } else {
+      hybridization = 'sp³';
+      if (n === 0) {
         geometry = 'Tetrahedral';
         bondAngle = '109.5°';
-        hybridization = 'sp³';
-        polarity = 'Nonpolar';
+        polarity = allSubstituentsIdentical && maxEnDiff >= 0.4 ? 'Nonpolar (Symmetric)' : allSubstituentsIdentical ? 'Nonpolar' : 'Polar (Asymmetric)';
+      } else if (n === 1) {
+        geometry = 'Trigonal Pyramidal';
+        bondAngle = '107.3°';
+        polarity = 'Polar';
+      } else {
+        geometry = 'Bent (Angular)';
+        bondAngle = '104.5°';
+        polarity = 'Polar';
       }
     } else if (stericNumber === 5) {
-      geometry = 'Trigonal Bipyramidal';
-      bondAngle = '90° / 120°';
       hybridization = 'sp³d';
-      polarity = 'Nonpolar';
+      if (n === 0) {
+        geometry = 'Trigonal Bipyramidal';
+        bondAngle = '90° / 120°';
+        polarity = allSubstituentsIdentical ? 'Nonpolar' : 'Polar';
+      } else if (n === 1) {
+        geometry = 'Seesaw';
+        bondAngle = '<90° / <120°';
+        polarity = 'Polar';
+      } else if (n === 2) {
+        geometry = 'T-Shaped';
+        bondAngle = '<90°';
+        polarity = 'Polar';
+      } else {
+        geometry = 'Linear';
+        bondAngle = '180°';
+        polarity = allSubstituentsIdentical ? 'Nonpolar' : 'Polar';
+      }
     } else if (stericNumber >= 6) {
-      geometry = 'Octahedral';
-      bondAngle = '90°';
       hybridization = 'sp³d²';
-      polarity = 'Nonpolar';
+      if (n === 0) {
+        geometry = 'Octahedral';
+        bondAngle = '90°';
+        polarity = allSubstituentsIdentical ? 'Nonpolar' : 'Polar';
+      } else if (n === 1) {
+        geometry = 'Square Pyramidal';
+        bondAngle = '<90°';
+        polarity = 'Polar';
+      } else {
+        geometry = 'Square Planar';
+        bondAngle = '90°';
+        polarity = allSubstituentsIdentical ? 'Nonpolar' : 'Polar';
+      }
     }
 
-    // 5. Match with Known Molecule Names
-    let iupacMatch = 'Custom Molecule';
+    // 5. Octet & Valency Check across all atoms
+    let unsatisfiedCount = 0;
+    let overvalentCount = 0;
+    builderAtoms.forEach((a) => {
+      const el = PALETTE_ELEMENTS[a.symbol] || PALETTE_ELEMENTS['H'];
+      const bCount = atomBondCounts[a.id] || 0;
+      if (bCount > el.maxBonds) overvalentCount++;
+      else if (bCount < el.standardValency) unsatisfiedCount++;
+    });
+
+    const isOctetValid = overvalentCount === 0 && unsatisfiedCount === 0 && builderBonds.length > 0;
+    const valencyStatus =
+      overvalentCount > 0
+        ? `Valency exceeded on ${overvalentCount} atom(s)`
+        : unsatisfiedCount > 0
+        ? `${unsatisfiedCount} atom(s) have open valence shells`
+        : 'Octet / Duet Rules Satisfied ✓';
+
+    // 6. Match with Known Molecule Names
+    let iupacMatch = 'Custom Structure';
     const matchPreset = MOLECULES_LIBRARY.find(
-      (m) => m.formula.replace(/\s+/g, '') === formattedFormula.replace(/\s+/g, '')
+      (mol) => mol.formula.replace(/\s+/g, '') === formattedFormula.replace(/\s+/g, '')
     );
     if (matchPreset) {
       iupacMatch = `${matchPreset.name} (${matchPreset.iupacName})`;
-    } else if (formattedFormula === 'H₂O') iupacMatch = 'Water (Oxidiane)';
+    } else if (formattedFormula === 'H₂O') iupacMatch = 'Water (Oxidane)';
     else if (formattedFormula === 'CO₂') iupacMatch = 'Carbon Dioxide';
     else if (formattedFormula === 'CH₄') iupacMatch = 'Methane';
     else if (formattedFormula === 'NH₃') iupacMatch = 'Ammonia (Azane)';
     else if (formattedFormula === 'O₃') iupacMatch = 'Ozone';
     else if (formattedFormula === 'H₂O₂') iupacMatch = 'Hydrogen Peroxide';
+    else if (formattedFormula === 'SO₂') iupacMatch = 'Sulfur Dioxide';
+    else if (formattedFormula === 'SF₆') iupacMatch = 'Sulfur Hexafluoride';
+    else if (formattedFormula === 'PCl₅') iupacMatch = 'Phosphorus Pentachloride';
+    else if (formattedFormula === 'HCl') iupacMatch = 'Hydrogen Chloride';
+    else if (formattedFormula === 'NaCl') iupacMatch = 'Sodium Chloride';
 
     return {
       formula: formattedFormula,
       molecularWeight: Number(mw.toFixed(3)),
       bondType: predictedBondType,
       geometry,
+      vseprNotation,
       bondAngle,
       hybridization,
       polarity,
@@ -291,34 +372,38 @@ export const MoleculeBuilder: React.FC = () => {
       iupacMatch,
       centralAtomSymbol: centralAtom.symbol,
       stericNumber,
-      lonePairsOnCentral,
+      lonePairsOnCentral: n,
+      formalChargeCentral,
+      valencyStatus,
+      isOctetValid,
+      centralNeighborsList,
     };
-  }, [builderAtoms, builderBonds]);
+  }, [builderAtoms, builderBonds, atomBondCounts]);
 
   // --- CANVAS ACTIONS ---
 
-  // Add atom to canvas from palette
   const addAtomNode = (symbol: string) => {
-    const id = `atom-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+    setValencyWarning(null);
+    const id = `atom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const newAtom: BuilderAtomNode = {
       id,
       symbol,
-      x: 200 + (builderAtoms.length % 5) * 40,
-      y: 180 + (builderAtoms.length % 4) * 35,
+      x: 220 + (builderAtoms.length % 5) * 45,
+      y: 190 + (builderAtoms.length % 4) * 40,
     };
     setBuilderAtoms([...builderAtoms, newAtom]);
     unlockAchievement('molecule_creator');
   };
 
-  // Remove atom and connected bonds
   const removeAtomNode = (atomId: string) => {
+    setValencyWarning(null);
     setBuilderAtoms(builderAtoms.filter((a) => a.id !== atomId));
     setBuilderBonds(builderBonds.filter((b) => b.sourceId !== atomId && b.targetId !== atomId));
     if (bondSourceAtomId === atomId) setBondSourceAtomId(null);
   };
 
-  // Click handler on an atom
   const handleAtomClick = (atomId: string) => {
+    setValencyWarning(null);
     if (toolMode === 'erase') {
       removeAtomNode(atomId);
       return;
@@ -328,17 +413,35 @@ export const MoleculeBuilder: React.FC = () => {
       if (!bondSourceAtomId) {
         setBondSourceAtomId(atomId);
       } else if (bondSourceAtomId !== atomId) {
-        // Toggle or add bond between source and target
+        const srcAtom = builderAtoms.find((a) => a.id === bondSourceAtomId);
+        const tgtAtom = builderAtoms.find((a) => a.id === atomId);
+        if (!srcAtom || !tgtAtom) return;
+
+        const srcEl = PALETTE_ELEMENTS[srcAtom.symbol] || PALETTE_ELEMENTS['H'];
+        const tgtEl = PALETTE_ELEMENTS[tgtAtom.symbol] || PALETTE_ELEMENTS['H'];
+
         const existingIndex = builderBonds.findIndex(
           (b) =>
             (b.sourceId === bondSourceAtomId && b.targetId === atomId) ||
             (b.sourceId === atomId && b.targetId === bondSourceAtomId)
         );
 
+        const srcCurrentBonds = atomBondCounts[srcAtom.id] || 0;
+        const tgtCurrentBonds = atomBondCounts[tgtAtom.id] || 0;
+
         if (existingIndex >= 0) {
-          // Cycle bond order: 1 -> 2 -> 3 -> remove
           const currentOrder = builderBonds[existingIndex].order;
           if (currentOrder < 3) {
+            if (srcCurrentBonds + 1 > srcEl.maxBonds) {
+              setValencyWarning(`${srcEl.name} (${srcEl.symbol}) cannot exceed ${srcEl.maxBonds} bond(s) (Octet/Duet limit).`);
+              setBondSourceAtomId(null);
+              return;
+            }
+            if (tgtCurrentBonds + 1 > tgtEl.maxBonds) {
+              setValencyWarning(`${tgtEl.name} (${tgtEl.symbol}) cannot exceed ${tgtEl.maxBonds} bond(s) (Octet/Duet limit).`);
+              setBondSourceAtomId(null);
+              return;
+            }
             const updated = [...builderBonds];
             updated[existingIndex].order = (currentOrder + 1) as 1 | 2 | 3;
             setBuilderBonds(updated);
@@ -346,7 +449,16 @@ export const MoleculeBuilder: React.FC = () => {
             setBuilderBonds(builderBonds.filter((_, idx) => idx !== existingIndex));
           }
         } else {
-          // Add new bond
+          if (srcCurrentBonds + selectedBondOrder > srcEl.maxBonds) {
+            setValencyWarning(`${srcEl.name} (${srcEl.symbol}) max valency is ${srcEl.maxBonds} bond(s).`);
+            setBondSourceAtomId(null);
+            return;
+          }
+          if (tgtCurrentBonds + selectedBondOrder > tgtEl.maxBonds) {
+            setValencyWarning(`${tgtEl.name} (${tgtEl.symbol}) max valency is ${tgtEl.maxBonds} bond(s).`);
+            setBondSourceAtomId(null);
+            return;
+          }
           const newBond: BuilderBondEdge = {
             id: `bond-${Date.now()}`,
             sourceId: bondSourceAtomId,
@@ -356,11 +468,12 @@ export const MoleculeBuilder: React.FC = () => {
           setBuilderBonds([...builderBonds, newBond]);
         }
         setBondSourceAtomId(null);
+      } else {
+        setBondSourceAtomId(null);
       }
     }
   };
 
-  // Dragging atom around canvas
   const handlePointerDownAtom = (e: React.PointerEvent, atomId: string) => {
     if (toolMode === 'select') {
       e.stopPropagation();
@@ -385,21 +498,20 @@ export const MoleculeBuilder: React.FC = () => {
     setDraggingAtomId(null);
   };
 
-  // Clear All Canvas
   const handleClearCanvas = () => {
+    setValencyWarning(null);
     setBuilderAtoms([]);
     setBuilderBonds([]);
     setBondSourceAtomId(null);
   };
 
-  // Load Preset directly into Builder Sandbox
   const loadPresetToSandbox = (mol: Molecule) => {
+    setValencyWarning(null);
     setSelectedPreset(mol);
 
-    // Convert preset 3D atoms to 2D canvas coordinates
-    const scale = 80;
-    const centerX = 220;
-    const centerY = 180;
+    const scale = 85;
+    const centerX = 280;
+    const centerY = 200;
 
     const newAtoms: BuilderAtomNode[] = mol.atoms.map((a, idx) => ({
       id: `preset-atom-${idx}`,
@@ -422,24 +534,25 @@ export const MoleculeBuilder: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
-      
+    <div className="space-y-5 w-full">
       {/* Top Header Mode Tabs */}
-      <div className="bg-slate-900/90 p-4 rounded-3xl border border-slate-800 shadow-2xl backdrop-blur-md flex flex-wrap items-center justify-between gap-4">
+      <div className="bg-black/40 p-4 sm:p-5 rounded-3xl border border-white/10 shadow-2xl backdrop-blur-3xl flex flex-wrap items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <Boxes className="w-6 h-6 text-cyan-400" />
-            <h2 className="text-xl font-extrabold text-white tracking-tight">Interactive Molecule Builder & Predictor</h2>
+            <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">
+              Interactive Molecule Builder & VSEPR Predictor
+            </h2>
             <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 text-xs font-mono font-bold border border-cyan-500/30">
-              Drag-&-Drop Science
+              AXₘEₙ + Octet Engine
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Construct 2D & 3D chemical structures, snap atoms, create bonds, and auto-calculate VSEPR geometry & polarity.
+            Construct 2D & 3D molecular topologies with strict valency enforcement, formal charge calculation, and VSEPR dipole geometry.
           </p>
         </div>
 
-        <div className="flex items-center gap-2 bg-slate-950 p-1.5 rounded-2xl border border-slate-800">
+        <div className="flex items-center gap-2 bg-black/50 p-1.5 rounded-2xl border border-white/10 shadow-inner">
           <button
             onClick={() => setActiveTab('custom-builder')}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
@@ -473,20 +586,18 @@ export const MoleculeBuilder: React.FC = () => {
           animate={{ opacity: 1, y: 0 }}
           className="space-y-6"
         >
-          {/* Main 3-Column Split View: Palette | Canvas Stage | Predicted Physics & Lewis */}
+          {/* Main 3-Column Split View on PC: Palette (3) | Canvas Stage (5) | Predicted Physics & Lewis (4) */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            
             {/* Left 3 Cols: Element Atom Palette */}
-            <div className="lg:col-span-3 bg-slate-900/90 p-5 rounded-3xl border border-slate-800 shadow-xl space-y-4 flex flex-col justify-between">
+            <div className="lg:col-span-3 bg-black/40 p-5 rounded-3xl border border-white/10 shadow-xl space-y-4 flex flex-col justify-between backdrop-blur-3xl">
               <div>
                 <h3 className="text-xs font-extrabold text-cyan-400 uppercase tracking-wider flex items-center gap-2 mb-3">
                   <Plus className="w-4 h-4" /> Atom Palette
                 </h3>
                 <p className="text-[11px] text-slate-400 mb-3">
-                  Click any atom symbol below to add it directly to your canvas stage:
+                  Click any atom to spawn it on the canvas. Max bond limits follow Octet/Duet & d-orbital rules:
                 </p>
 
-                {/* Grid Palette */}
                 <div className="grid grid-cols-2 gap-2">
                   {Object.values(PALETTE_ELEMENTS).map((el) => (
                     <button
@@ -495,14 +606,19 @@ export const MoleculeBuilder: React.FC = () => {
                       className="p-2.5 rounded-2xl bg-slate-950 hover:bg-slate-800/80 border border-slate-800/80 hover:border-cyan-500/50 flex items-center gap-2.5 transition-all cursor-pointer group"
                     >
                       <div
-                        className="w-8 h-8 rounded-full flex items-center justify-center font-extrabold text-xs text-white shadow-md border border-white/30"
-                        style={{ backgroundColor: el.color }}
+                        className="w-8 h-8 rounded-full flex items-center justify-center font-extrabold text-xs text-slate-950 shadow-md border border-white/40 shrink-0"
+                        style={{
+                          backgroundColor: el.color,
+                          color: el.symbol === 'H' || el.symbol === 'S' || el.symbol === 'Na' ? '#0f172a' : '#ffffff',
+                        }}
                       >
                         {el.symbol}
                       </div>
-                      <div className="text-left">
-                        <div className="text-xs font-bold text-slate-200 group-hover:text-cyan-300">{el.name}</div>
-                        <div className="text-[9px] font-mono text-slate-400">Valence: {el.valenceElectrons}e⁻</div>
+                      <div className="text-left min-w-0">
+                        <div className="text-xs font-bold text-slate-200 group-hover:text-cyan-300 truncate">{el.name}</div>
+                        <div className="text-[9px] font-mono text-slate-400">
+                          Val: {el.valenceElectrons}e⁻ · Max: {el.maxBonds}
+                        </div>
                       </div>
                     </button>
                   ))}
@@ -511,29 +627,26 @@ export const MoleculeBuilder: React.FC = () => {
 
               {/* Quick Preset Launcher inside palette */}
               <div className="pt-4 border-t border-slate-800/80 space-y-2">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Load Quick Structure:</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Load Quick Reference Structure:</span>
                 <div className="flex flex-wrap gap-1.5">
-                  {MOLECULES_LIBRARY.slice(0, 6).map((m) => (
+                  {MOLECULES_LIBRARY.map((m) => (
                     <button
                       key={m.id}
                       onClick={() => loadPresetToSandbox(m)}
-                      className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-cyan-600 text-slate-200 hover:text-white text-[11px] font-bold font-mono transition-all border border-slate-700 cursor-pointer"
+                      className="px-2.5 py-1 rounded-xl bg-slate-900 hover:bg-cyan-500 text-slate-200 hover:text-slate-950 text-[11px] font-bold font-mono transition-all border border-slate-700 cursor-pointer"
+                      title={m.name}
                     >
                       {m.formula}
                     </button>
                   ))}
                 </div>
               </div>
-
             </div>
 
             {/* Middle 5 Cols: Interactive Drag-&-Drop Canvas */}
-            <div className="lg:col-span-5 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 p-5 rounded-3xl border border-slate-800 shadow-2xl relative min-h-[480px] flex flex-col justify-between overflow-hidden">
-              
+            <div className="lg:col-span-5 bg-black/40 p-5 rounded-3xl border border-white/10 shadow-2xl relative min-h-[520px] flex flex-col justify-between overflow-hidden backdrop-blur-3xl">
               {/* Canvas Toolbar Controls */}
-              <div className="flex flex-wrap items-center justify-between gap-2 z-10 bg-slate-900/90 p-2.5 rounded-2xl border border-slate-800 backdrop-blur-md">
-                
-                {/* Mode Selectors */}
+              <div className="flex flex-wrap items-center justify-between gap-2 z-10 bg-black/50 p-2.5 rounded-2xl border border-white/10 backdrop-blur-md shadow-inner">
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => {
@@ -557,7 +670,7 @@ export const MoleculeBuilder: React.FC = () => {
                         ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
-                    title="Click two atoms to connect or change bond order"
+                    title="Click two atoms to connect or cycle bond order"
                   >
                     <LinkIcon className="w-3.5 h-3.5" /> Bond
                   </button>
@@ -605,12 +718,25 @@ export const MoleculeBuilder: React.FC = () => {
                 </button>
               </div>
 
+              {/* Valency / Octet Warning Banner */}
+              {valencyWarning && (
+                <div className="mt-2 px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-200 text-xs flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-1.5 font-semibold">
+                    <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                    {valencyWarning}
+                  </span>
+                  <button onClick={() => setValencyWarning(null)} className="text-[10px] underline">
+                    Dismiss
+                  </button>
+                </div>
+              )}
+
               {/* Main SVG & HTML Interactive Canvas */}
               <div
                 ref={canvasRef}
                 onPointerMove={handlePointerMoveCanvas}
                 onPointerUp={handlePointerUpCanvas}
-                className="relative w-full h-[360px] my-2 rounded-2xl bg-slate-950/60 border border-slate-800/80 overflow-hidden touch-none cursor-crosshair"
+                className="relative w-full h-[390px] my-2 rounded-2xl bg-slate-950/70 border border-slate-800/80 overflow-hidden touch-none cursor-crosshair"
               >
                 {/* SVG Render Layer for Bond Lines */}
                 <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
@@ -623,7 +749,6 @@ export const MoleculeBuilder: React.FC = () => {
                     const dy = tgt.y - src.y;
                     const dist = Math.hypot(dx, dy) || 1;
 
-                    // Perpendicular offset for double/triple bonds
                     const nx = -dy / dist;
                     const ny = dx / dist;
 
@@ -643,19 +768,19 @@ export const MoleculeBuilder: React.FC = () => {
                         {b.order === 2 && (
                           <>
                             <line
-                              x1={src.x + nx * 3}
-                              y1={src.y + ny * 3}
-                              x2={tgt.x + nx * 3}
-                              y2={tgt.y + ny * 3}
+                              x1={src.x + nx * 3.5}
+                              y1={src.y + ny * 3.5}
+                              x2={tgt.x + nx * 3.5}
+                              y2={tgt.y + ny * 3.5}
                               stroke="#38bdf8"
                               strokeWidth="3.5"
                               strokeLinecap="round"
                             />
                             <line
-                              x1={src.x - nx * 3}
-                              y1={src.y - ny * 3}
-                              x2={tgt.x - nx * 3}
-                              y2={tgt.y - ny * 3}
+                              x1={src.x - nx * 3.5}
+                              y1={src.y - ny * 3.5}
+                              x2={tgt.x - nx * 3.5}
+                              y2={tgt.y - ny * 3.5}
                               stroke="#38bdf8"
                               strokeWidth="3.5"
                               strokeLinecap="round"
@@ -674,19 +799,19 @@ export const MoleculeBuilder: React.FC = () => {
                               strokeLinecap="round"
                             />
                             <line
-                              x1={src.x + nx * 5}
-                              y1={src.y + ny * 5}
-                              x2={tgt.x + nx * 5}
-                              y2={tgt.y + ny * 5}
+                              x1={src.x + nx * 5.5}
+                              y1={src.y + ny * 5.5}
+                              x2={tgt.x + nx * 5.5}
+                              y2={tgt.y + ny * 5.5}
                               stroke="#f59e0b"
                               strokeWidth="3"
                               strokeLinecap="round"
                             />
                             <line
-                              x1={src.x - nx * 5}
-                              y1={src.y - ny * 5}
-                              x2={tgt.x - nx * 5}
-                              y2={tgt.y - ny * 5}
+                              x1={src.x - nx * 5.5}
+                              y1={src.y - ny * 5.5}
+                              x2={tgt.x - nx * 5.5}
+                              y2={tgt.y - ny * 5.5}
                               stroke="#f59e0b"
                               strokeWidth="3"
                               strokeLinecap="round"
@@ -702,6 +827,8 @@ export const MoleculeBuilder: React.FC = () => {
                 {builderAtoms.map((a) => {
                   const elData = PALETTE_ELEMENTS[a.symbol] || PALETTE_ELEMENTS['H'];
                   const isBondSource = bondSourceAtomId === a.id;
+                  const currentBonds = atomBondCounts[a.id] || 0;
+                  const isSatisfied = currentBonds === elData.standardValency;
 
                   return (
                     <motion.div
@@ -709,146 +836,184 @@ export const MoleculeBuilder: React.FC = () => {
                       layoutId={a.id}
                       onPointerDown={(e) => handlePointerDownAtom(e, a.id)}
                       onClick={() => handleAtomClick(a.id)}
-                      className={`absolute rounded-full flex items-center justify-center font-extrabold text-xs text-white shadow-xl transition-transform cursor-pointer select-none z-10 ${
+                      className={`absolute rounded-full flex flex-col items-center justify-center font-extrabold text-xs shadow-xl transition-transform cursor-pointer select-none z-10 ${
                         isBondSource ? 'ring-4 ring-amber-400 scale-125' : 'hover:scale-110'
                       }`}
                       style={{
                         left: `${a.x}px`,
                         top: `${a.y}px`,
-                        width: `${elData.radius * 1.3}px`,
-                        height: `${elData.radius * 1.3}px`,
+                        width: `${elData.radius * 1.35}px`,
+                        height: `${elData.radius * 1.35}px`,
                         transform: 'translate(-50%, -50%)',
                         backgroundColor: elData.color,
-                        border: '2px solid rgba(255,255,255,0.4)',
+                        color: a.symbol === 'H' || a.symbol === 'S' || a.symbol === 'Na' ? '#0f172a' : '#ffffff',
+                        border: isSatisfied
+                          ? '2px solid rgba(52, 211, 153, 0.9)'
+                          : '2px solid rgba(255,255,255,0.4)',
                       }}
                     >
-                      {a.symbol}
+                      <span>{a.symbol}</span>
+                      <span className="text-[8px] font-mono opacity-80 leading-none">
+                        {currentBonds}/{elData.standardValency}
+                      </span>
                     </motion.div>
                   );
                 })}
               </div>
 
-              <p className="text-center text-[11px] text-slate-400 z-10">
-                💡 <span className="font-semibold text-slate-200">Tips:</span> In <strong>Bond Mode</strong>, click 1st atom then 2nd atom to link. Click bond repeatedly to change order (Single → Double → Triple).
-              </p>
-
+              <div className="flex items-center justify-between text-[11px] text-slate-400 z-10 px-1">
+                <span>
+                  In <strong>Bond Mode</strong>, click 1st atom then 2nd atom to link or cycle bond order (1 → 2 → 3).
+                </span>
+                <span
+                  className={`font-mono font-bold flex items-center gap-1 ${
+                    predictedData.isOctetValid ? 'text-emerald-400' : 'text-amber-400'
+                  }`}
+                >
+                  {predictedData.isOctetValid ? <CheckCircle2 className="w-3.5 h-3.5" /> : null}
+                  {predictedData.valencyStatus}
+                </span>
+              </div>
             </div>
 
-            {/* Right 4 Cols: Predicted Physics & Lewis Structure */}
-            <div className="lg:col-span-4 bg-slate-900/90 p-5 rounded-3xl border border-slate-800 shadow-xl space-y-4 flex flex-col justify-between">
-              
+            {/* Right 4 Cols: Predicted Physics & Dynamic Lewis Structure */}
+            <div className="lg:col-span-4 bg-black/40 p-5 rounded-3xl border border-white/10 shadow-xl space-y-4 flex flex-col justify-between backdrop-blur-3xl">
               <div className="space-y-3">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                   <h3 className="text-xs font-extrabold text-cyan-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4" /> Predicted Properties
+                    <Sparkles className="w-4 h-4" /> VSEPR & Electronic Telemetry
                   </h3>
-                  <span className="font-mono text-xs font-extrabold text-amber-400">
+                  <span className="font-mono text-sm font-black text-amber-400">
                     {predictedData.formula}
                   </span>
                 </div>
 
                 {/* Properties Cards Grid */}
                 <div className="space-y-2 text-xs">
-                  
-                  <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex justify-between items-center">
-                    <span className="text-slate-400">IUPAC / Name Match:</span>
+                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 flex justify-between items-center">
+                    <span className="text-slate-400">IUPAC / Common Name:</span>
                     <strong className="text-cyan-300 font-bold">{predictedData.iupacMatch}</strong>
                   </div>
 
-                  <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex justify-between items-center">
+                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 flex justify-between items-center">
                     <span className="text-slate-400">Molecular Weight:</span>
                     <strong className="text-white font-mono">{predictedData.molecularWeight} g/mol</strong>
                   </div>
 
-                  <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex justify-between items-center">
-                    <span className="text-slate-400">VSEPR Shape:</span>
-                    <strong className="text-emerald-400 font-bold">{predictedData.geometry}</strong>
-                  </div>
-
-                  <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex justify-between items-center">
-                    <span className="text-slate-400">Estimated Bond Angle:</span>
-                    <strong className="text-amber-400 font-mono">{predictedData.bondAngle}</strong>
-                  </div>
-
-                  <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex justify-between items-center">
-                    <span className="text-slate-400">Hybridization State:</span>
-                    <strong className="text-purple-400 font-mono">{predictedData.hybridization}</strong>
-                  </div>
-
-                  <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex justify-between items-center">
-                    <span className="text-slate-400">Bond Character:</span>
-                    <strong className="text-cyan-400 font-bold">{predictedData.bondType}</strong>
-                  </div>
-
-                  <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex justify-between items-center">
-                    <span className="text-slate-400">Overall Polarity:</span>
-                    <strong className={predictedData.polarity === 'Polar' ? 'text-rose-400 font-bold' : 'text-slate-300 font-bold'}>
-                      {predictedData.polarity}
+                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 flex justify-between items-center">
+                    <span className="text-slate-400">VSEPR Class & Shape:</span>
+                    <strong className="text-emerald-400 font-bold">
+                      {predictedData.geometry} <span className="font-mono text-cyan-300">({predictedData.vseprNotation})</span>
                     </strong>
                   </div>
 
+                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 flex justify-between items-center">
+                    <span className="text-slate-400">Ideal Bond Angle:</span>
+                    <strong className="text-amber-400 font-mono">{predictedData.bondAngle}</strong>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 flex justify-between items-center">
+                    <span className="text-slate-400">Central Hybridization:</span>
+                    <strong className="text-purple-400 font-mono">
+                      {predictedData.hybridization} (SN = {predictedData.stericNumber})
+                    </strong>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 flex justify-between items-center">
+                    <span className="text-slate-400">Central Formal Charge:</span>
+                    <strong className="text-slate-200 font-mono">
+                      {predictedData.centralAtomSymbol}: {predictedData.formalChargeCentral >= 0 ? `+${predictedData.formalChargeCentral}` : predictedData.formalChargeCentral}
+                    </strong>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 flex justify-between items-center">
+                    <span className="text-slate-400">Bond Character & Polarity:</span>
+                    <strong className={predictedData.polarity.startsWith('Polar') ? 'text-rose-400 font-bold' : 'text-emerald-300 font-bold'}>
+                      {predictedData.bondType} · {predictedData.polarity}
+                    </strong>
+                  </div>
                 </div>
 
-                {/* Lewis Structure Rendering Display */}
-                <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                    Live Lewis Structure Diagram:
-                  </span>
+                {/* Dynamic Lewis Structure Diagram */}
+                <div className="p-3.5 rounded-2xl bg-black/40 border border-white/10 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      Central Atom Lewis Domain Diagram
+                    </span>
+                    <span className="text-[10px] font-mono text-amber-300">
+                      Lone Pairs: {predictedData.lonePairsOnCentral} | Total e⁻: {predictedData.totalValenceElectrons}
+                    </span>
+                  </div>
 
-                  <div className="h-28 bg-slate-900 rounded-xl border border-slate-800/80 flex items-center justify-center p-2 relative">
-                    {/* SVG Render for Lewis structure diagram */}
-                    <svg className="w-full h-full">
-                      <g transform="translate(100, 50)">
+                  <div className="h-32 bg-black/60 rounded-xl border border-white/5 flex items-center justify-center p-2 relative">
+                    <svg className="w-full h-full" viewBox="0 0 240 120">
+                      <g transform="translate(120, 60)">
                         {/* Central Symbol */}
                         <text
                           x="0"
-                          y="5"
+                          y="6"
                           textAnchor="middle"
                           fill="#38bdf8"
-                          fontSize="22"
+                          fontSize="20"
                           fontWeight="bold"
                           fontFamily="monospace"
                         >
                           {predictedData.centralAtomSymbol}
                         </text>
 
+                        {/* Render actual connected neighbors radially */}
+                        {predictedData.centralNeighborsList.slice(0, 6).map((nb, idx, arr) => {
+                          const angle = (idx / Math.max(1, arr.length)) * Math.PI * 2;
+                          const x1 = Math.cos(angle) * 18;
+                          const y1 = Math.sin(angle) * 18;
+                          const x2 = Math.cos(angle) * 38;
+                          const y2 = Math.sin(angle) * 38;
+                          const tx = Math.cos(angle) * 50;
+                          const ty = Math.sin(angle) * 50 + 4;
+
+                          return (
+                            <g key={idx}>
+                              <line
+                                x1={x1}
+                                y1={y1}
+                                x2={x2}
+                                y2={y2}
+                                stroke={nb.order === 3 ? '#f59e0b' : nb.order === 2 ? '#38bdf8' : '#94a3b8'}
+                                strokeWidth={nb.order === 3 ? '4' : nb.order === 2 ? '3' : '2'}
+                              />
+                              <text
+                                x={tx}
+                                y={ty}
+                                textAnchor="middle"
+                                fill="#f8fafc"
+                                fontSize="13"
+                                fontWeight="bold"
+                                fontFamily="monospace"
+                              >
+                                {nb.symbol}
+                              </text>
+                            </g>
+                          );
+                        })}
+
                         {/* Lone Pair Dots on Central Atom */}
-                        {predictedData.lonePairsOnCentral >= 1 && (
-                          <g fill="#f59e0b">
-                            <circle cx="-5" cy="-18" r="2.5" />
-                            <circle cx="5" cy="-18" r="2.5" />
-                          </g>
-                        )}
-                        {predictedData.lonePairsOnCentral >= 2 && (
-                          <g fill="#f59e0b">
-                            <circle cx="-5" cy="22" r="2.5" />
-                            <circle cx="5" cy="22" r="2.5" />
-                          </g>
-                        )}
-
-                        {/* Outer Connected Bonds representation */}
-                        <line x1="20" y1="0" x2="45" y2="0" stroke="#94a3b8" strokeWidth="3" />
-                        <text x="58" y="5" fill="#ffffff" fontSize="16" fontWeight="bold">
-                          X
-                        </text>
-
-                        {predictedData.stericNumber >= 2 && (
-                          <>
-                            <line x1="-20" y1="0" x2="-45" y2="0" stroke="#94a3b8" strokeWidth="3" />
-                            <text x="-58" y="5" fill="#ffffff" fontSize="16" fontWeight="bold">
-                              X
-                            </text>
-                          </>
-                        )}
+                        {Array.from({ length: Math.min(3, predictedData.lonePairsOnCentral) }).map((_, lpIdx) => {
+                          const baseAngle = -Math.PI / 2 + lpIdx * (Math.PI / 2);
+                          const cx = Math.cos(baseAngle) * 22;
+                          const cy = Math.sin(baseAngle) * 22;
+                          return (
+                            <g key={`lp-${lpIdx}`} fill="#f59e0b">
+                              <circle cx={cx - 3} cy={cy} r="2.2" />
+                              <circle cx={cx + 3} cy={cy} r="2.2" />
+                            </g>
+                          );
+                        })}
                       </g>
                     </svg>
                   </div>
                 </div>
-
               </div>
-
             </div>
-
           </div>
         </motion.div>
       )}
@@ -861,7 +1026,7 @@ export const MoleculeBuilder: React.FC = () => {
           className="space-y-6"
         >
           {/* Preset Selector Banner */}
-          <div className="bg-slate-900/80 p-4 rounded-2xl border border-slate-800 backdrop-blur-md space-y-3">
+          <div className="bg-black/40 p-4 rounded-2xl border border-white/10 backdrop-blur-3xl space-y-3">
             <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
               <Boxes className="w-4 h-4 text-cyan-400" /> Preset 3D Molecule Gallery
             </h3>
@@ -872,13 +1037,13 @@ export const MoleculeBuilder: React.FC = () => {
                   <button
                     key={m.id}
                     onClick={() => setSelectedPreset(m)}
-                    className={`px-3 py-2 rounded-xl text-xs font-bold transition-all border whitespace-nowrap flex items-center gap-2 cursor-pointer ${
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all border whitespace-nowrap flex items-center gap-2 cursor-pointer ${
                       active
-                        ? 'bg-cyan-500 text-white border-cyan-400 shadow-md shadow-cyan-500/20'
-                        : 'bg-slate-800/60 text-slate-300 border-slate-700 hover:bg-slate-800'
+                        ? 'bg-cyan-500 text-slate-950 border-cyan-400 shadow-md shadow-cyan-500/20'
+                        : 'bg-black/40 text-slate-300 border-white/10 hover:bg-black/60'
                     }`}
                   >
-                    <span className="font-mono text-cyan-300 font-extrabold">{m.formula}</span>
+                    <span className="font-mono font-extrabold">{m.formula}</span>
                     <span>{m.name}</span>
                   </button>
                 );
@@ -887,24 +1052,23 @@ export const MoleculeBuilder: React.FC = () => {
           </div>
 
           {/* Main 3D Molecule Visualizer & Property Split View */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
-            {/* Left 2 Cols: Interactive 3D Canvas Stage */}
-            <div className="lg:col-span-2 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 p-6 rounded-3xl border border-slate-800 relative min-h-[460px] flex flex-col justify-between shadow-2xl overflow-hidden">
-              
-              {/* Controls Bar */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Left 8 Cols: Interactive 3D Canvas Stage */}
+            <div className="lg:col-span-8 bg-black/40 p-6 rounded-3xl border border-white/10 relative min-h-[480px] flex flex-col justify-between shadow-2xl overflow-hidden backdrop-blur-3xl">
               <div className="flex items-center justify-between z-10">
                 <div>
-                  <h2 className="text-xl font-extrabold text-white flex items-center gap-2">
+                  <h2 className="text-xl sm:text-2xl font-extrabold text-white flex items-center gap-2">
                     {selectedPreset.name} <span className="text-cyan-400 font-mono">({selectedPreset.formula})</span>
                   </h2>
-                  <p className="text-xs text-slate-400">{selectedPreset.iupacName} | MW: {selectedPreset.molecularWeight} g/mol</p>
+                  <p className="text-xs text-slate-400">
+                    {selectedPreset.iupacName} | MW: {selectedPreset.molecularWeight} g/mol
+                  </p>
                 </div>
 
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => loadPresetToSandbox(selectedPreset)}
-                    className="px-3 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-extrabold flex items-center gap-1 cursor-pointer shadow-md"
+                    className="px-3.5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer shadow-md"
                   >
                     <AtomIcon className="w-3.5 h-3.5" /> Edit in Sandbox
                   </button>
@@ -914,16 +1078,17 @@ export const MoleculeBuilder: React.FC = () => {
                       setRotationX(15);
                       setRotationY(30);
                     }}
-                    className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                    className="p-2 rounded-xl bg-black/40 hover:bg-black/60 border border-white/10 text-slate-300 text-xs font-semibold cursor-pointer"
+                    title="Reset 3D Orientation"
                   >
-                    <RefreshCw className="w-3.5 h-3.5" />
+                    <RefreshCw className="w-4 h-4" />
                   </button>
                 </div>
               </div>
 
-              {/* Render 3D Molecule Graphic (Interactive Spheres & Cylinders) */}
+              {/* Render 3D Molecule Graphic */}
               <div
-                className="w-full h-72 my-4 relative flex items-center justify-center cursor-grab active:cursor-grabbing"
+                className="w-full h-80 my-4 relative flex items-center justify-center cursor-grab active:cursor-grabbing"
                 onMouseMove={(e) => {
                   if (e.buttons === 1) {
                     setRotationY((prev) => prev + e.movementX * 0.5);
@@ -938,13 +1103,12 @@ export const MoleculeBuilder: React.FC = () => {
                     transformStyle: 'preserve-3d',
                   }}
                 >
-                  {/* Render Bonds */}
                   {selectedPreset.bonds.map((bond, idx) => {
                     const sourceAtom = selectedPreset.atoms[bond.source];
                     const targetAtom = selectedPreset.atoms[bond.target];
                     if (!sourceAtom || !targetAtom) return null;
 
-                    const scale = 70;
+                    const scale = 75;
                     const x1 = (sourceAtom.x || 0) * scale;
                     const y1 = (sourceAtom.y || 0) * scale;
                     const z1 = (sourceAtom.z || 0) * scale;
@@ -973,13 +1137,12 @@ export const MoleculeBuilder: React.FC = () => {
                     );
                   })}
 
-                  {/* Render Atom Spheres */}
                   {selectedPreset.atoms.map((atom, idx) => {
-                    const scale = 70;
+                    const scale = 75;
                     const x = (atom.x || 0) * scale;
                     const y = (atom.y || 0) * scale;
                     const z = (atom.z || 0) * scale;
-                    const size = atom.symbol === 'H' ? 36 : 52;
+                    const size = atom.symbol === 'H' ? 38 : 54;
 
                     return (
                       <div
@@ -1001,56 +1164,53 @@ export const MoleculeBuilder: React.FC = () => {
               </div>
 
               <p className="text-center text-xs text-slate-400 z-10">
-                🖱️ Click and drag mouse to rotate molecule structure in 3D.
+                Click and drag anywhere on the stage to rotate the 3D molecular geometry.
               </p>
-
             </div>
 
-            {/* Right 1 Col: Molecular Properties & Predictor */}
-            <div className="bg-slate-900/80 p-6 rounded-3xl border border-slate-800 space-y-5 flex flex-col justify-between">
+            {/* Right 4 Cols: Molecular Properties & Predictor */}
+            <div className="lg:col-span-4 bg-black/40 p-6 rounded-3xl border border-white/10 space-y-5 flex flex-col justify-between backdrop-blur-3xl">
               <div className="space-y-4">
                 <h3 className="text-sm font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-2">
-                  <Sparkles className="w-4 h-4" /> Predicted Molecular Physics
+                  <Sparkles className="w-4 h-4" /> Molecular Geometry & Physics
                 </h3>
 
                 <div className="space-y-3 text-xs">
-                  <div className="p-3 rounded-xl bg-slate-800/50 border border-slate-800 flex justify-between items-center">
-                    <span className="text-slate-400">Geometry Shape</span>
+                  <div className="p-3 rounded-2xl bg-black/20 border border-white/10 flex justify-between items-center shadow-inner">
+                    <span className="text-white/50">Geometry Shape</span>
                     <span className="font-bold text-slate-100">{selectedPreset.geometry}</span>
                   </div>
 
-                  <div className="p-3 rounded-xl bg-slate-800/50 border border-slate-800 flex justify-between items-center">
-                    <span className="text-slate-400">Bond Angle</span>
+                  <div className="p-3 rounded-2xl bg-black/20 border border-white/10 flex justify-between items-center shadow-inner">
+                    <span className="text-white/50">Bond Angle</span>
                     <span className="font-mono font-bold text-cyan-400">{selectedPreset.bondAngle}</span>
                   </div>
 
-                  <div className="p-3 rounded-xl bg-slate-800/50 border border-slate-800 flex justify-between items-center">
-                    <span className="text-slate-400">Hybridization State</span>
+                  <div className="p-3 rounded-2xl bg-black/20 border border-white/10 flex justify-between items-center shadow-inner">
+                    <span className="text-white/50">Hybridization State</span>
                     <span className="font-mono font-bold text-purple-400">{selectedPreset.hybridization}</span>
                   </div>
 
-                  <div className="p-3 rounded-xl bg-slate-800/50 border border-slate-800 flex justify-between items-center">
-                    <span className="text-slate-400">Bond Type</span>
+                  <div className="p-3 rounded-2xl bg-black/20 border border-white/10 flex justify-between items-center shadow-inner">
+                    <span className="text-white/50">Bond Type</span>
                     <span className="font-bold text-emerald-400">{selectedPreset.bondType}</span>
                   </div>
 
-                  <div className="p-3 rounded-xl bg-slate-800/50 border border-slate-800 flex justify-between items-center">
-                    <span className="text-slate-400">Molecular Polarity</span>
+                  <div className="p-3 rounded-2xl bg-black/20 border border-white/10 flex justify-between items-center shadow-inner">
+                    <span className="text-white/50">Molecular Polarity</span>
                     <span className="font-bold text-rose-400">{selectedPreset.polarity}</span>
                   </div>
                 </div>
 
-                <p className="text-xs text-slate-300 leading-relaxed bg-slate-800/30 p-3 rounded-xl border border-slate-800">
+                <p className="text-xs text-white/70 leading-relaxed bg-black/20 p-4 rounded-2xl border border-white/10 shadow-inner">
                   {selectedPreset.description}
                 </p>
               </div>
-
             </div>
-
           </div>
         </motion.div>
       )}
-
     </div>
   );
 };
+

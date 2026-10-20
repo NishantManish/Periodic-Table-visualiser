@@ -682,13 +682,42 @@ export const PeriodicTrends: React.FC = () => {
 
           {/* Interactive 118-Element Periodic Grid */}
           <div className="overflow-x-auto scrollbar-thin pb-2">
-            <div className="min-w-[850px] grid grid-cols-18 gap-1.5 p-2 bg-slate-950 rounded-2xl border border-slate-800/80">
+            <div 
+              style={{ display: 'grid', gridTemplateColumns: 'repeat(18, minmax(0, 1fr))' }}
+              className="min-w-[960px] grid grid-cols-[repeat(18,minmax(0,1fr))] gap-1.5 p-3 bg-slate-950 rounded-2xl border border-slate-800/80"
+            >
               {Array.from({ length: 7 }, (_, periodIdx) => {
                 const pNum = periodIdx + 1;
                 return Array.from({ length: 18 }, (_, groupIdx) => {
                   const gNum = groupIdx + 1;
 
-                  const el = ELEMENTS.find((e) => e.period === pNum && e.group === gNum);
+                  // Period 6, Group 3 placeholder (57-71)
+                  if (pNum === 6 && gNum === 3) {
+                    return (
+                      <div
+                        key="la-trend-placeholder"
+                        className="relative aspect-square rounded-xl p-1 flex flex-col items-center justify-center border border-indigo-500/40 bg-indigo-950/30 text-indigo-300 select-none shadow-sm"
+                      >
+                        <span className="text-[9px] font-mono font-bold">57-71</span>
+                        <span className="text-[7.5px]">La-Lu</span>
+                      </div>
+                    );
+                  }
+
+                  // Period 7, Group 3 placeholder (89-103)
+                  if (pNum === 7 && gNum === 3) {
+                    return (
+                      <div
+                        key="ac-trend-placeholder"
+                        className="relative aspect-square rounded-xl p-1 flex flex-col items-center justify-center border border-fuchsia-500/40 bg-fuchsia-950/30 text-fuchsia-300 select-none shadow-sm"
+                      >
+                        <span className="text-[9px] font-mono font-bold">89-103</span>
+                        <span className="text-[7.5px]">Ac-Lr</span>
+                      </div>
+                    );
+                  }
+
+                  const el = ELEMENTS.find((e) => e.period === pNum && e.group === gNum && !(e.atomicNumber >= 57 && e.atomicNumber <= 71) && !(e.atomicNumber >= 89 && e.atomicNumber <= 103));
                   if (!el) {
                     return <div key={`empty-${pNum}-${gNum}`} className="w-full aspect-square" />;
                   }
@@ -729,50 +758,74 @@ export const PeriodicTrends: React.FC = () => {
           {/* Lanthanides & Actinides Strip */}
           <div className="space-y-2 pt-2 border-t border-slate-800">
             <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Lanthanides & Actinides</span>
-            <div className="overflow-x-auto scrollbar-thin">
-              <div className="min-w-[850px] space-y-1.5">
+            <div className="overflow-x-auto scrollbar-thin pb-2">
+              <div className="min-w-[960px] space-y-1.5 p-3 bg-slate-950 rounded-2xl border border-slate-800/80">
                 {/* Lanthanides */}
-                <div className="flex gap-1.5 pl-[100px]">
-                  {ELEMENTS.filter((e) => e.category === 'lanthanide').map((el) => {
-                    const val = el[primaryProperty as keyof ElementData] as number | null;
-                    const color = getHeatmapColor(val);
+                <div 
+                  style={{ display: 'grid', gridTemplateColumns: 'repeat(18, minmax(0, 1fr))' }}
+                  className="grid grid-cols-[repeat(18,minmax(0,1fr))] gap-1.5 items-center"
+                >
+                  <div className="col-start-1 col-span-2 text-right pr-2 text-[10px] font-bold text-indigo-400 uppercase">
+                    57-71
+                  </div>
+                  <div 
+                    style={{ gridColumn: '3 / span 15', display: 'grid', gridTemplateColumns: 'repeat(15, minmax(0, 1fr))' }}
+                    className="col-start-3 col-span-[15] grid grid-cols-[repeat(15,minmax(0,1fr))] gap-1.5"
+                  >
+                    {ELEMENTS.filter((e) => e.atomicNumber >= 57 && e.atomicNumber <= 71).map((el) => {
+                      const val = el[primaryProperty as keyof ElementData] as number | null;
+                      const color = getHeatmapColor(val);
 
-                    return (
-                      <motion.button
-                        key={el.atomicNumber}
-                        whileHover={{ scale: 1.15, zIndex: 30 }}
-                        onClick={() => setSelectedElement(el)}
-                        className="w-11 aspect-square rounded-xl p-1 flex flex-col items-center justify-between border border-slate-800 shadow-sm cursor-pointer"
-                        style={{ backgroundColor: val !== null ? color : '#0f172a', color: '#fff' }}
-                      >
-                        <span className="text-[8px] font-mono opacity-80">{el.atomicNumber}</span>
-                        <span className="text-xs font-extrabold">{el.symbol}</span>
-                        <span className="text-[8px] font-mono">{val !== null ? val : 'N/A'}</span>
-                      </motion.button>
-                    );
-                  })}
+                      return (
+                        <motion.button
+                          key={el.atomicNumber}
+                          whileHover={{ scale: 1.15, zIndex: 30 }}
+                          onClick={() => setSelectedElement(el)}
+                          onMouseEnter={() => setHoveredElement(el)}
+                          className="relative aspect-square rounded-xl p-1 flex flex-col items-center justify-between border border-slate-800/60 shadow-sm cursor-pointer"
+                          style={{ backgroundColor: val !== null ? color : '#0f172a', color: '#fff' }}
+                        >
+                          <span className="text-[8px] font-mono opacity-80">{el.atomicNumber}</span>
+                          <span className="text-xs font-extrabold">{el.symbol}</span>
+                          <span className="text-[8px] font-mono">{val !== null ? val : 'N/A'}</span>
+                        </motion.button>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {/* Actinides */}
-                <div className="flex gap-1.5 pl-[100px]">
-                  {ELEMENTS.filter((e) => e.category === 'actinide').map((el) => {
-                    const val = el[primaryProperty as keyof ElementData] as number | null;
-                    const color = getHeatmapColor(val);
+                <div 
+                  style={{ display: 'grid', gridTemplateColumns: 'repeat(18, minmax(0, 1fr))' }}
+                  className="grid grid-cols-[repeat(18,minmax(0,1fr))] gap-1.5 items-center"
+                >
+                  <div className="col-start-1 col-span-2 text-right pr-2 text-[10px] font-bold text-fuchsia-400 uppercase">
+                    89-103
+                  </div>
+                  <div 
+                    style={{ gridColumn: '3 / span 15', display: 'grid', gridTemplateColumns: 'repeat(15, minmax(0, 1fr))' }}
+                    className="col-start-3 col-span-[15] grid grid-cols-[repeat(15,minmax(0,1fr))] gap-1.5"
+                  >
+                    {ELEMENTS.filter((e) => e.atomicNumber >= 89 && e.atomicNumber <= 103).map((el) => {
+                      const val = el[primaryProperty as keyof ElementData] as number | null;
+                      const color = getHeatmapColor(val);
 
-                    return (
-                      <motion.button
-                        key={el.atomicNumber}
-                        whileHover={{ scale: 1.15, zIndex: 30 }}
-                        onClick={() => setSelectedElement(el)}
-                        className="w-11 aspect-square rounded-xl p-1 flex flex-col items-center justify-between border border-slate-800 shadow-sm cursor-pointer"
-                        style={{ backgroundColor: val !== null ? color : '#0f172a', color: '#fff' }}
-                      >
-                        <span className="text-[8px] font-mono opacity-80">{el.atomicNumber}</span>
-                        <span className="text-xs font-extrabold">{el.symbol}</span>
-                        <span className="text-[8px] font-mono">{val !== null ? val : 'N/A'}</span>
-                      </motion.button>
-                    );
-                  })}
+                      return (
+                        <motion.button
+                          key={el.atomicNumber}
+                          whileHover={{ scale: 1.15, zIndex: 30 }}
+                          onClick={() => setSelectedElement(el)}
+                          onMouseEnter={() => setHoveredElement(el)}
+                          className="relative aspect-square rounded-xl p-1 flex flex-col items-center justify-between border border-slate-800/60 shadow-sm cursor-pointer"
+                          style={{ backgroundColor: val !== null ? color : '#0f172a', color: '#fff' }}
+                        >
+                          <span className="text-[8px] font-mono opacity-80">{el.atomicNumber}</span>
+                          <span className="text-xs font-extrabold">{el.symbol}</span>
+                          <span className="text-[8px] font-mono">{val !== null ? val : 'N/A'}</span>
+                        </motion.button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>

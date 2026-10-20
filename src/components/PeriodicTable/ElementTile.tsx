@@ -9,13 +9,15 @@ interface ElementTileProps {
   heatmapProperty?: HeatmapProperty;
   minHeatmapVal?: number;
   maxHeatmapVal?: number;
+  onHover?: (element: ElementData | null) => void;
 }
 
-export const ElementTile: React.FC<ElementTileProps> = ({
+export const ElementTile: React.FC<ElementTileProps> = React.memo(({
   element,
   heatmapProperty = 'none',
   minHeatmapVal = 0,
   maxHeatmapVal = 100,
+  onHover,
 }) => {
   const { setSelectedElement, selectedElement, bookmarks } = useAppStore();
   const isSelected = selectedElement?.atomicNumber === element.atomicNumber;
@@ -32,17 +34,16 @@ export const ElementTile: React.FC<ElementTileProps> = ({
     const rawVal = element[heatmapProperty as keyof ElementData] as number | null;
     if (rawVal !== null && rawVal !== undefined) {
       const norm = Math.max(0, Math.min(1, (rawVal - minHeatmapVal) / (maxHeatmapVal - minHeatmapVal || 1)));
-      // Interpolate from deep indigo (low) to cyan (mid) to bright orange/red (high)
       const hue = (1 - norm) * 240; // 240 (blue) down to 0 (red)
       heatmapColorStyle = {
-        backgroundColor: `hsla(${hue}, 85%, 35%, 0.4)`,
-        borderColor: `hsla(${hue}, 90%, 55%, 0.8)`,
+        backgroundColor: `hsla(${hue}, 85%, 35%, 0.55)`,
+        borderColor: `hsla(${hue}, 90%, 60%, 0.85)`,
       };
       heatmapValDisplay = String(rawVal);
     } else {
       heatmapColorStyle = {
-        backgroundColor: 'rgba(51, 65, 85, 0.2)',
-        borderColor: 'rgba(71, 85, 105, 0.3)',
+        backgroundColor: 'rgba(30, 41, 59, 0.45)',
+        borderColor: 'rgba(71, 85, 105, 0.4)',
       };
       heatmapValDisplay = 'N/A';
     }
@@ -51,27 +52,28 @@ export const ElementTile: React.FC<ElementTileProps> = ({
   return (
     <button
       onClick={() => setSelectedElement(element)}
+      onMouseEnter={() => onHover?.(element)}
       style={heatmapProperty !== 'none' ? heatmapColorStyle : {}}
       aria-label={`Element ${element.atomicNumber}: ${element.name} (${element.symbol}), ${element.category.replace('-', ' ')}, state ${element.state}, atomic mass ${element.atomicMass.toFixed(2)}`}
-      className={`group relative flex flex-col justify-between p-1.5 sm:p-2 rounded-xl transition-all duration-200 cursor-pointer text-left select-none border min-h-[64px] sm:min-h-[72px] md:min-h-[78px] focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:z-40 ${
+      className={`group relative flex flex-col justify-between w-full h-full min-h-[60px] lg:min-h-[68px] xl:min-h-[76px] 2xl:min-h-[82px] p-1 sm:p-1.5 xl:p-2 rounded-xl border transition-all duration-200 cursor-pointer text-left select-none focus:outline-none focus:ring-2 focus:ring-cyan-300 shadow-sm ${
         heatmapProperty === 'none'
-          ? `${categoryStyle.bg} hover:border-cyan-400 hover:shadow-lg hover:shadow-cyan-500/20 hover:-translate-y-0.5 active:scale-95`
-          : 'hover:scale-105 hover:z-20 shadow-md active:scale-95'
+          ? `${categoryStyle.bg} hover:border-cyan-300 hover:shadow-xl hover:shadow-cyan-500/25 hover:-translate-y-0.5 hover:z-20 active:scale-95`
+          : 'hover:-translate-y-0.5 hover:z-20 shadow-md hover:border-white/60 active:scale-95'
       } ${
         isSelected
-          ? 'ring-2 ring-cyan-400 border-cyan-400 scale-[1.05] z-30 shadow-xl shadow-cyan-500/30'
-          : 'border-slate-800/80 dark:border-slate-800/80'
+          ? 'ring-2 ring-cyan-300 border-cyan-300 -translate-y-0.5 z-30 shadow-xl shadow-cyan-500/40 bg-white/10 backdrop-blur-md'
+          : 'border-white/15 backdrop-blur-sm'
       }`}
     >
       {/* Top Header: Atomic Number & State Indicator */}
-      <div className="flex items-center justify-between w-full text-[10px] sm:text-xs font-mono font-semibold opacity-90">
-        <span className="text-slate-300 dark:text-slate-300 font-bold">{element.atomicNumber}</span>
-        <div className="flex items-center gap-1">
-          {isBookmarked && <Bookmark className="w-2.5 h-2.5 text-amber-400 fill-amber-400" />}
+      <div className="flex items-center justify-between w-full text-[9px] xl:text-[10px] font-mono font-bold leading-none opacity-90">
+        <span className="text-white/85">{element.atomicNumber}</span>
+        <div className="flex items-center gap-0.5">
+          {isBookmarked && <Bookmark className="w-2.5 h-2.5 text-amber-300 fill-amber-300" />}
           <span
             className={`w-1.5 h-1.5 rounded-full ${
               element.state === 'gas'
-                ? 'bg-sky-400 animate-pulse'
+                ? 'bg-sky-300'
                 : element.state === 'liquid'
                 ? 'bg-blue-400'
                 : element.state === 'synthetic'
@@ -84,32 +86,33 @@ export const ElementTile: React.FC<ElementTileProps> = ({
       </div>
 
       {/* Main Symbol */}
-      <div className="my-0.5 text-center">
-        <span className="text-base sm:text-lg md:text-xl font-extrabold tracking-tight text-slate-100 dark:text-slate-100 group-hover:text-cyan-300 transition-colors">
+      <div className="my-0.5 text-center flex items-center justify-center relative">
+        <span className="text-sm sm:text-base lg:text-lg xl:text-xl font-black tracking-tight text-white group-hover:text-cyan-200 transition-colors leading-none">
           {element.symbol}
         </span>
       </div>
 
       {/* Bottom Name & Atomic Mass or Heatmap Value */}
-      <div className="w-full text-[9px] sm:text-[10px] leading-tight overflow-hidden">
+      <div className="w-full text-center overflow-hidden">
         {heatmapProperty !== 'none' ? (
-          <div className="text-center font-mono font-bold text-cyan-300 truncate">
+          <div className="font-mono font-bold text-cyan-200 text-[9px] xl:text-[10px] truncate leading-tight">
             {heatmapValDisplay}
           </div>
         ) : (
-          <>
-            <div className="font-semibold text-slate-200 dark:text-slate-200 truncate group-hover:text-white">
+          <div className="space-y-0.5">
+            <div className="font-bold text-white/95 text-[8px] lg:text-[8.5px] xl:text-[9.5px] truncate group-hover:text-white leading-tight">
               {element.name}
             </div>
-            <div className="text-slate-400 dark:text-slate-400 font-mono text-[8px] sm:text-[9px] truncate">
+            <div className="text-white/65 font-mono font-medium text-[7px] xl:text-[8px] truncate leading-none hidden sm:block">
               {element.atomicMass.toFixed(2)}
             </div>
-          </>
+          </div>
         )}
       </div>
 
       {/* Subtle Glow Effect on Hover */}
-      <div className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-t from-cyan-500/10 to-transparent pointer-events-none" />
+      <div className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-t from-cyan-400/15 to-transparent pointer-events-none" />
     </button>
   );
-};
+});
+

@@ -101,7 +101,6 @@ export const useAppStore = create<AppState>()(
       // Default view
       viewMode: 'table',
       setViewMode: (mode) => {
-        playSound('toggle', get().soundEnabled);
         set({ viewMode: mode });
       },
 
@@ -109,7 +108,6 @@ export const useAppStore = create<AppState>()(
       selectedElement: null,
       setSelectedElement: (element) => {
         if (element) {
-          playSound('open', get().soundEnabled);
           get().unlockAchievement('first_element');
         }
         set({ selectedElement: element });
@@ -150,7 +148,6 @@ export const useAppStore = create<AppState>()(
       // Grade Level
       gradeLevel: 'Grade 10',
       setGradeLevel: (level) => {
-        playSound('click', get().soundEnabled);
         set({ gradeLevel: level });
       },
 
@@ -168,16 +165,10 @@ export const useAppStore = create<AppState>()(
       addXp: (amount) => {
         const newXp = get().xp + amount;
         const newLevel = Math.floor(newXp / 200) + 1;
-        if (newLevel > get().level) {
-          playSound('levelUp', get().soundEnabled);
-        } else {
-          playSound('correct', get().soundEnabled);
-        }
         set({ xp: newXp, level: newLevel });
       },
 
       toggleBookmark: (atomicNumber) => {
-        playSound('click', get().soundEnabled);
         const current = get().bookmarks;
         if (current.includes(atomicNumber)) {
           set({ bookmarks: current.filter((id) => id !== atomicNumber) });
@@ -187,7 +178,6 @@ export const useAppStore = create<AppState>()(
       },
 
       saveNote: (atomicNumber, note) => {
-        playSound('click', get().soundEnabled);
         set({
           notes: {
             ...get().notes,
@@ -200,7 +190,6 @@ export const useAppStore = create<AppState>()(
         const list = get().achievements;
         const found = list.find((a) => a.id === id);
         if (found && !found.unlocked) {
-          playSound('levelUp', get().soundEnabled);
           set({
             achievements: list.map((a) =>
               a.id === id ? { ...a, unlocked: true, unlockedAt: new Date().toLocaleDateString() } : a
@@ -210,7 +199,7 @@ export const useAppStore = create<AppState>()(
       },
 
       // Settings
-      soundEnabled: true,
+      soundEnabled: false,
       toggleSound: () => set((state) => ({ soundEnabled: !state.soundEnabled })),
 
       theme: 'dark',
@@ -218,7 +207,6 @@ export const useAppStore = create<AppState>()(
       toggleTheme: () =>
         set((state) => {
           const next = state.theme === 'dark' ? 'light' : 'dark';
-          playSound('toggle', state.soundEnabled);
           return { theme: next };
         }),
 

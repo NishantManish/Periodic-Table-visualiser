@@ -1,52 +1,29 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
+  Brain,
   Sparkles,
   Send,
   Loader2,
-  Bot,
-  User,
-  GraduationCap,
-  RefreshCw,
-  Scale,
   HelpCircle,
-  Brain,
-  Lightbulb,
-  BookOpen,
-  CheckCircle2,
-  XCircle,
-  Atom,
-  Zap,
-  ArrowRight,
-  ChevronDown,
-  Layers,
+  Scale,
   Award,
+  BookOpen,
+  Lightbulb,
+  Zap,
+  Layers,
+  ArrowRight,
+  RefreshCw,
+  PanelLeftClose,
+  PanelLeft,
 } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import { ELEMENTS } from '../../data/elementsData';
 import { ElementData, GradeLevel } from '../../types';
-
-interface Message {
-  id: string;
-  sender: 'ai' | 'user';
-  text: string;
-  quiz?: {
-    question: string;
-    options: string[];
-    correctIndex: number;
-    explanation: string;
-    selectedOption?: number;
-  };
-}
-
-const GRADE_LEVELS: GradeLevel[] = [
-  'Grade 5',
-  'Grade 8',
-  'Grade 10',
-  'CBSE/ICSE',
-  'JEE/NEET',
-  'University',
-];
+import { TutorSidebar } from './TutorSidebar';
+import { TutorMessageItem, TutorMessage } from './TutorMessageItem';
+import { TutorComparePanel } from './TutorComparePanel';
+import { playSound } from '../../utils/audio';
 
 export const AiTutorView: React.FC = () => {
   const {
@@ -58,56 +35,79 @@ export const AiTutorView: React.FC = () => {
     addXp,
   } = useAppStore();
 
-  // Selected Elements for Comparison Context
-  const [element1, setElement1] = useState<ElementData>(selectedElement || ELEMENTS[0]); // Default H
-  const [element2, setElement2] = useState<ElementData>(ELEMENTS[1]); // Default He
+  // Active elements for tutoring & comparison
+  const [element1, setElement1] = useState<ElementData>(selectedElement || ELEMENTS[0]);
+  const [element2, setElement2] = useState<ElementData>(ELEMENTS[1]); // Default Helium
 
-  // Active AI Mode Tab: 'ask' | 'explain-element' | 'compare' | 'quiz' | 'mnemonic'
-  const [activeMode, setActiveMode] = useState<'ask' | 'explain-element' | 'compare' | 'quiz' | 'mnemonic'>('ask');
+  // Active Tab Mode: 'ask' | 'deep-dive' | 'compare' | 'quiz' | 'mnemonic'
+  const [activeMode, setActiveMode] = useState<'ask' | 'deep-dive' | 'compare' | 'quiz' | 'mnemonic'>('ask');
 
-  const [messages, setMessages] = useState<Message[]>([
+  // Sound and Sidebar visibility
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  // Messages state
+  const [messages, setMessages] = useState<TutorMessage[]>([
     {
       id: 'welcome-msg',
       sender: 'ai',
-      text: `Hello! I am your AI Chemistry Tutor calibrated for **${gradeLevel}**.
-      
-I remember your active element context (**${
-        selectedElement ? `${selectedElement.name} (${selectedElement.symbol})` : 'Hydrogen (H)'
-      }**). Ask me anything, generate custom quizzes, compare elements, or simplify complex quantum chemistry concepts!`,
+      text: `👋 **Welcome to your AI Chemistry Tutor!**
+
+I am powered by **NVIDIA NIM** (\`meta/llama-3.2-11b-vision-instruct\`) and calibrated for **${gradeLevel}**.
+Active focus: **${element1.name} (${element1.symbol}, Z=${element1.atomicNumber})**.
+
+What would you like to explore today?
+* Ask any chemistry question or homework problem
+* Request real-world industrial or biochemical uses
+* Generate practice quizzes with instant XP scoring
+* Create memorable mnemonics for exams and competitions`,
+      timestamp: 'Just now',
+      provider: 'nvidia-nim',
+      model: 'meta/llama-3.2-11b-vision-instruct',
     },
   ]);
 
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Sync selected element from global store when user changes element elsewhere
+  // Sync active element from global store when user selects an element in table or 3D view
   useEffect(() => {
     if (selectedElement) {
       setElement1(selectedElement);
     }
   }, [selectedElement]);
 
-  // Send request to Gemini server route
+  // Autoscroll to bottom when messages update
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading]);
+
+  // Execute API call (NVIDIA NIM single-call exclusively)
   const handleSendMessage = async (customPrompt?: string, modeOverride?: string) => {
-    const query = customPrompt || input;
-    if (!query.trim() || loading) return;
+    const query = (customPrompt || input).trim();
+    if (!query || loading) return;
 
     const userMsgId = `user-${Date.now()}`;
-    const newMsgs: Message[] = [
-      ...messages,
-      { id: userMsgId, sender: 'user', text: query },
-    ];
+    const userMsg: TutorMessage = {
+      id: userMsgId,
+      sender: 'user',
+      text: query,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
 
+    const newMsgs = [...messages, userMsg];
     setMessages(newMsgs);
     if (!customPrompt) setInput('');
     setLoading(true);
+    playSound('whoosh', soundEnabled);
     unlockAchievement('ai_convo');
 
-    try {
-      const mode = modeOverride || activeMode;
+    const effectiveMode = modeOverride || activeMode;
 
-      if (mode === 'quiz') {
-        // Special Quiz Generation Endpoint
+    try {
+      if (effectiveMode === 'quiz') {
+        // Fast Quiz Endpoint
         const res = await fetch('/api/ai/generate-quiz', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -127,12 +127,18 @@ I remember your active element context (**${
             {
               id: `ai-${Date.now()}`,
               sender: 'ai',
-              text: `Here is a custom quiz question on **${query}** (${gradeLevel} level):`,
+              text: `Here is a practice question on **${query}** calibrated for **${gradeLevel}**:`,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              provider: data.provider || 'nvidia-nim',
+              model: data.model || 'meta/llama-3.2-11b-vision-instruct',
+              latencyMs: data.latencyMs,
+              cached: data.cached,
               quiz: {
                 question: quizObj.question,
                 options: quizObj.options,
                 correctIndex: quizObj.correctIndex,
                 explanation: quizObj.explanation,
+                category: quizObj.category || 'Practice Question',
               },
             },
           ]);
@@ -142,19 +148,25 @@ I remember your active element context (**${
             {
               id: `ai-${Date.now()}`,
               sender: 'ai',
-              text: 'Unable to parse quiz payload. Here is a review topic instead.',
+              text: 'Unable to parse custom quiz. Please try a different topic or element!',
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             },
           ]);
         }
       } else {
-        // Standard Explanation / Q&A Route
+        // Fast Explain Endpoint
+        let backendMode = 'normal';
+        if (effectiveMode === 'mnemonic') backendMode = 'mnemonic';
+        else if (effectiveMode === 'compare') backendMode = 'comparison';
+        else if (effectiveMode === 'simple') backendMode = 'simple';
+
         const res = await fetch('/api/ai/explain', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             prompt: query,
             gradeLevel,
-            mode: mode === 'mnemonic' ? 'mnemonic' : mode === 'compare' ? 'comparison' : 'normal',
+            mode: backendMode,
           }),
         });
 
@@ -164,17 +176,23 @@ I remember your active element context (**${
           {
             id: `ai-${Date.now()}`,
             sender: 'ai',
-            text: data.result || 'No response generated from AI engine.',
+            text: data.result || 'No response generated.',
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            provider: data.provider || 'nvidia-nim',
+            model: data.model || 'meta/llama-3.2-11b-vision-instruct',
+            latencyMs: data.latencyMs,
+            cached: data.cached,
           },
         ]);
       }
-    } catch (err) {
+    } catch (err: any) {
       setMessages([
         ...newMsgs,
         {
           id: `ai-${Date.now()}`,
           sender: 'ai',
-          text: 'Connection error: Unable to communicate with the Gemini AI service.',
+          text: `⚠️ **Service Notice**: Could not complete request (${err?.message || 'Network issue'}). Please try again.`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
     } finally {
@@ -182,381 +200,379 @@ I remember your active element context (**${
     }
   };
 
-  // Quick Action Handler for Element 1
-  const handleQuickElementAction = (actionType: 'explain' | 'simplify' | 'quiz' | 'mnemonic') => {
+  // Quick Action Chips for Element 1
+  const handleQuickAction = (action: 'explain' | 'simplify' | 'quiz' | 'mnemonic' | 'spectroscopy') => {
     const el = element1;
-    if (actionType === 'explain') {
+    if (action === 'explain') {
       handleSendMessage(
-        `Provide a comprehensive explanation of ${el.name} (${el.symbol}, Z=${el.atomicNumber}). Cover its electron configuration ${el.electronConfiguration}, category ${el.category}, physical properties, and key real-world uses.`,
-        'explain-element'
+        `Provide a concise, high-yield overview of ${el.name} (${el.symbol}, Z=${el.atomicNumber}). Detail its category (${el.category}), electron configuration (${el.electronConfiguration}), reactivity, and top industrial application.`,
+        'normal'
       );
-    } else if (actionType === 'simplify') {
+    } else if (action === 'simplify') {
       handleSendMessage(
-        `Explain ${el.name} (${el.symbol}) using a fun, intuitive analogy that a beginner can easily understand. Avoid heavy jargon.`,
+        `Explain the chemical behavior of ${el.name} (${el.symbol}) using a memorable real-world analogy. Avoid complex jargon.`,
         'simple'
       );
-    } else if (actionType === 'quiz') {
-      handleSendMessage(`${el.name} chemistry and properties`, 'quiz');
-    } else if (actionType === 'mnemonic') {
+    } else if (action === 'quiz') {
+      handleSendMessage(`${el.name} properties and periodic trends`, 'quiz');
+    } else if (action === 'mnemonic') {
       handleSendMessage(
-        `Create a clever mnemonic, rhyme, or memory trick to remember the properties, group, or atomic number of ${el.name} (${el.symbol}).`,
+        `Create a clever mnemonic or rhyme to remember ${el.name} (${el.symbol}, Group ${el.group || 'N/A'}, Period ${el.period}) and its primary properties.`,
         'mnemonic'
+      );
+    } else if (action === 'spectroscopy') {
+      handleSendMessage(
+        `Explain the spectroscopy and emission spectrum of ${el.name} (${el.symbol}). What causes its spectral lines and what flame test color does it produce?`,
+        'normal'
       );
     }
   };
 
-  // Compare Two Elements
-  const handleCompareElements = () => {
-    const prompt = `Compare ${element1.name} (${element1.symbol}, Z=${element1.atomicNumber}) with ${element2.name} (${element2.symbol}, Z=${element2.atomicNumber}). Compare their atomic radius, electronegativity, ionization energy, reactivity, group trends, and industrial applications.`;
+  // Compare elements action
+  const handleRunComparison = () => {
+    const prompt = `Compare ${element1.name} (${element1.symbol}, Z=${element1.atomicNumber}) with ${element2.name} (${element2.symbol}, Z=${element2.atomicNumber}). Compare their atomic radius, electronegativity, ionization energy, chemical reactivity, and key applications side-by-side.`;
     handleSendMessage(prompt, 'compare');
   };
 
-  // Quiz Option Click Handler
-  const handleAnswerQuiz = (msgId: string, optionIdx: number) => {
+  // Quiz Answer Handler
+  const handleAnswerQuiz = (messageId: string, optionIdx: number) => {
     setMessages((prev) =>
-      prev.map((m) => {
-        if (m.id === msgId && m.quiz && m.quiz.selectedOption === undefined) {
-          const isCorrect = optionIdx === m.quiz.correctIndex;
+      prev.map((msg) => {
+        if (msg.id === messageId && msg.quiz && msg.quiz.selectedOption === undefined) {
+          const isCorrect = optionIdx === msg.quiz.correctIndex;
           if (isCorrect) {
             addXp(25);
           }
           return {
-            ...m,
+            ...msg,
             quiz: {
-              ...m.quiz,
+              ...msg.quiz,
               selectedOption: optionIdx,
             },
           };
         }
-        return m;
+        return msg;
       })
     );
   };
 
+  // Trigger next question on same topic
+  const handleNextQuiz = () => {
+    handleSendMessage(`${element1.name} periodic trends`, 'quiz');
+  };
+
+  // Export Study Notes
+  const handleExportNotes = () => {
+    const transcript = messages
+      .map(
+        (m) =>
+          `[${m.timestamp || ''}] ${m.sender === 'user' ? 'STUDENT' : 'AI TUTOR'}:\n${m.text}\n`
+      )
+      .join('\n----------------------------------------\n\n');
+
+    const blob = new Blob([transcript], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `chemistry-study-notes-${new Date().toISOString().slice(0, 10)}.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Clear Chat
+  const handleClearChat = () => {
+    setMessages([
+      {
+        id: 'welcome-reset',
+        sender: 'ai',
+        text: `Chat cleared. Ready for your next chemistry topic at **${gradeLevel}** level!`,
+        timestamp: 'Just now',
+        provider: 'nvidia-nim',
+        model: 'meta/llama-3.2-11b-vision-instruct',
+      },
+    ]);
+  };
+
   return (
-    <div className="max-w-6xl mx-auto bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-5 flex flex-col min-h-[680px]">
-      
-      {/* Top Header & Education Level Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white shadow-xl shadow-purple-600/30">
-            <Brain className="w-6 h-6" />
-          </div>
-          <div>
-            <h2 className="text-lg font-extrabold text-white flex items-center gap-2">
-              AI Chemistry Tutor & Lab Assistant
-            </h2>
-            <p className="text-xs text-slate-400">
-              Interactive Gemini AI tutor tailored to your specific education level
-            </p>
-          </div>
-        </div>
-
-        {/* Grade Level Selector */}
-        <div className="flex items-center gap-2 bg-slate-950 p-1.5 rounded-2xl border border-slate-800">
-          <GraduationCap className="w-4 h-4 text-purple-400 ml-2" />
-          <span className="text-xs font-bold text-slate-400">Level:</span>
-          <select
-            value={gradeLevel}
-            onChange={(e) => setGradeLevel(e.target.value as GradeLevel)}
-            className="bg-slate-900 text-purple-300 font-extrabold text-xs px-3 py-1.5 rounded-xl border border-slate-800 focus:outline-none cursor-pointer"
+    <div className="max-w-7xl mx-auto flex flex-col lg:flex-row gap-4 min-h-[720px] pb-10">
+      {/* Collapsible Left Rail (Sidebar) */}
+      <AnimatePresence initial={false}>
+        {sidebarOpen && (
+          <motion.div
+            initial={{ opacity: 0, width: 0 }}
+            animate={{ opacity: 1, width: 'auto' }}
+            exit={{ opacity: 0, width: 0 }}
+            transition={{ duration: 0.2 }}
+            className="w-full lg:w-80 shrink-0"
           >
-            {GRADE_LEVELS.map((lvl) => (
-              <option key={lvl} value={lvl}>
-                {lvl}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
+            <TutorSidebar
+              activeElement={element1}
+              onSelectElement={(el) => {
+                setElement1(el);
+                setSelectedElement(el);
+              }}
+              gradeLevel={gradeLevel}
+              onGradeLevelChange={setGradeLevel}
+              soundEnabled={soundEnabled}
+              onToggleSound={() => setSoundEnabled(!soundEnabled)}
+              onQuickPrompt={(p, m) => handleSendMessage(p, m)}
+              onExportNotes={handleExportNotes}
+              onClearChat={handleClearChat}
+              providerBadge="NVIDIA NIM"
+              modelBadge="Llama 3.2 11B (Ultra-Fast)"
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* Active Element Context Banner */}
-      <div className="bg-gradient-to-r from-purple-950/60 via-slate-950 to-indigo-950/60 p-4 rounded-2xl border border-purple-500/30 flex flex-wrap items-center justify-between gap-4">
+      {/* Main Interactive Stage */}
+      <div className="flex-1 flex flex-col bg-black/40 border border-white/10 rounded-2xl p-4 sm:p-6 shadow-2xl backdrop-blur-3xl saturate-200 min-w-0 relative overflow-hidden">
+        {/* Glow */}
+        <div className="absolute top-0 right-0 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl -z-10"></div>
+        <div className="absolute bottom-0 left-0 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl -z-10"></div>
         
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-purple-600 text-white font-mono font-black text-sm flex items-center justify-center shadow-md">
-            {element1.symbol}
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-extrabold text-white">
-                {element1.name} (Z={element1.atomicNumber})
-              </span>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-mono border border-purple-500/30">
-                Active Context
-              </span>
+        {/* Top App Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-white/10">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/50 hover:text-white border border-white/10 transition-all cursor-pointer shadow-sm"
+              title={sidebarOpen ? 'Hide sidebar' : 'Show study deck'}
+            >
+              {sidebarOpen ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeft className="w-4 h-4" />}
+            </button>
+
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 via-indigo-600 to-cyan-600 flex items-center justify-center text-white shadow-lg shadow-purple-600/30 border border-white/10">
+              <Brain className="w-5 h-5" />
             </div>
-            <p className="text-[11px] text-slate-400">
-              {element1.category} | {element1.electronConfiguration}
-            </p>
+
+            <div>
+              <h2 className="text-sm sm:text-base font-extrabold text-white flex items-center gap-2 drop-shadow-sm">
+                AI Chemistry Tutor & Lab Assistant
+                <span className="hidden sm:inline-block px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 text-[10px] font-mono border border-purple-500/30 shadow-inner">
+                  {gradeLevel}
+                </span>
+              </h2>
+              <p className="text-[11px] text-white/50 font-medium">
+                Single-call NVIDIA NIM acceleration • Direct Socratic feedback
+              </p>
+            </div>
           </div>
-        </div>
 
-        {/* Quick Element Action Chips */}
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => handleQuickElementAction('explain')}
-            className="px-3 py-1.5 rounded-xl bg-purple-600/30 hover:bg-purple-600 text-purple-200 text-xs font-bold border border-purple-500/40 transition-all cursor-pointer flex items-center gap-1.5"
-          >
-            <BookOpen className="w-3.5 h-3.5" /> Explain
-          </button>
-
-          <button
-            onClick={() => handleQuickElementAction('simplify')}
-            className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold border border-amber-500/40 transition-all cursor-pointer flex items-center gap-1.5"
-          >
-            <Lightbulb className="w-3.5 h-3.5" /> Simplify
-          </button>
-
-          <button
-            onClick={() => handleQuickElementAction('quiz')}
-            className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-bold border border-emerald-500/40 transition-all cursor-pointer flex items-center gap-1.5"
-          >
-            <Award className="w-3.5 h-3.5" /> Quiz Me
-          </button>
-
-          <button
-            onClick={() => handleQuickElementAction('mnemonic')}
-            className="px-3 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 text-xs font-bold border border-cyan-500/40 transition-all cursor-pointer flex items-center gap-1.5"
-          >
-            <Zap className="w-3.5 h-3.5" /> Mnemonic
-          </button>
-        </div>
-
-      </div>
-
-      {/* Mode Toolbar: General Ask | Compare Elements | Quiz Generator */}
-      <div className="flex items-center gap-2 border-b border-slate-800 pb-3 overflow-x-auto scrollbar-none">
-        
-        <button
-          onClick={() => setActiveMode('ask')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-extrabold transition-all cursor-pointer ${
-            activeMode === 'ask'
-              ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/30'
-              : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
-          }`}
-        >
-          <HelpCircle className="w-4 h-4" /> General Q&A
-        </button>
-
-        <button
-          onClick={() => setActiveMode('compare')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-extrabold transition-all cursor-pointer ${
-            activeMode === 'compare'
-              ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/30'
-              : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
-          }`}
-        >
-          <Scale className="w-4 h-4" /> Compare Elements
-        </button>
-
-        <button
-          onClick={() => setActiveMode('quiz')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-extrabold transition-all cursor-pointer ${
-            activeMode === 'quiz'
-              ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/30'
-              : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
-          }`}
-        >
-          <Award className="w-4 h-4" /> AI Quiz Generator
-        </button>
-
-      </div>
-
-      {/* Mode Sub-Panels */}
-      {activeMode === 'compare' && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: 'auto' }}
-          className="p-4 rounded-2xl bg-slate-950 border border-slate-800 flex flex-wrap items-center justify-between gap-4"
-        >
-          <div className="flex items-center gap-3 flex-1 min-w-[200px]">
-            <span className="text-xs font-bold text-slate-400">Element A:</span>
-            <select
-              value={element1.atomicNumber}
-              onChange={(e) => {
-                const el = ELEMENTS.find((x) => x.atomicNumber === parseInt(e.target.value));
-                if (el) {
-                  setElement1(el);
-                  setSelectedElement(el);
-                }
+          {/* Mode Pill Bar */}
+          <div className="flex items-center gap-1.5 bg-black/20 p-1.5 rounded-xl border border-white/10 overflow-x-auto scrollbar-none shadow-inner">
+            <button
+              onClick={() => {
+                setActiveMode('ask');
+                playSound('toggle', soundEnabled);
               }}
-              className="bg-slate-900 text-slate-200 font-bold text-xs px-3 py-2 rounded-xl border border-slate-800 flex-1 focus:outline-none"
-            >
-              {ELEMENTS.map((el) => (
-                <option key={el.atomicNumber} value={el.atomicNumber}>
-                  {el.atomicNumber}. {el.name} ({el.symbol})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="text-amber-400 font-black text-xs">VS</div>
-
-          <div className="flex items-center gap-3 flex-1 min-w-[200px]">
-            <span className="text-xs font-bold text-slate-400">Element B:</span>
-            <select
-              value={element2.atomicNumber}
-              onChange={(e) => {
-                const el = ELEMENTS.find((x) => x.atomicNumber === parseInt(e.target.value));
-                if (el) setElement2(el);
-              }}
-              className="bg-slate-900 text-slate-200 font-bold text-xs px-3 py-2 rounded-xl border border-slate-800 flex-1 focus:outline-none"
-            >
-              {ELEMENTS.map((el) => (
-                <option key={el.atomicNumber} value={el.atomicNumber}>
-                  {el.atomicNumber}. {el.name} ({el.symbol})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <button
-            onClick={handleCompareElements}
-            disabled={loading}
-            className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs rounded-xl shadow-md shadow-purple-600/30 transition-all cursor-pointer"
-          >
-            Compare Side-by-Side
-          </button>
-        </motion.div>
-      )}
-
-      {/* Main Messages Stream Area */}
-      <div className="flex-1 overflow-y-auto space-y-4 scrollbar-none pr-2 min-h-[300px]">
-        {messages.map((m) => (
-          <div
-            key={m.id}
-            className={`flex items-start gap-3 ${m.sender === 'user' ? 'flex-row-reverse' : ''}`}
-          >
-            <div
-              className={`w-9 h-9 rounded-2xl flex items-center justify-center shrink-0 shadow-md ${
-                m.sender === 'user'
-                  ? 'bg-cyan-600 text-white'
-                  : 'bg-gradient-to-tr from-purple-600 to-indigo-600 text-white'
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+                activeMode === 'ask'
+                  ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30'
+                  : 'text-white/50 hover:text-white hover:bg-white/5'
               }`}
             >
-              {m.sender === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
-            </div>
+              <HelpCircle className="w-3.5 h-3.5" /> Ask Tutor
+            </button>
 
-            <div className="space-y-3 max-w-2xl">
-              {/* Message Text Bubble */}
-              <div
-                className={`p-4 rounded-2xl text-xs leading-relaxed whitespace-pre-line shadow-md ${
-                  m.sender === 'user'
-                    ? 'bg-cyan-600 text-white rounded-tr-none'
-                    : 'bg-slate-950 text-slate-200 border border-slate-800 rounded-tl-none font-sans'
-                }`}
-              >
-                {m.text}
-              </div>
+            <button
+              onClick={() => {
+                setActiveMode('compare');
+                playSound('toggle', soundEnabled);
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+                activeMode === 'compare'
+                  ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30'
+                  : 'text-white/50 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Scale className="w-3.5 h-3.5" /> Compare
+            </button>
 
-              {/* Render Interactive Quiz Card if generated by AI */}
-              {m.quiz && (
-                <div className="p-4 rounded-2xl bg-slate-950 border border-purple-500/40 space-y-3 shadow-xl">
-                  <div className="flex items-center justify-between text-xs font-extrabold text-purple-300">
-                    <span className="flex items-center gap-1.5">
-                      <Award className="w-4 h-4 text-purple-400" /> AI Practice Question
-                    </span>
-                    <span className="text-[10px] font-mono text-slate-400">+25 XP</span>
-                  </div>
+            <button
+              onClick={() => {
+                setActiveMode('quiz');
+                playSound('toggle', soundEnabled);
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+                activeMode === 'quiz'
+                  ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30'
+                  : 'text-white/50 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Award className="w-3.5 h-3.5" /> Quiz
+            </button>
 
-                  <p className="text-xs font-bold text-white">{m.quiz.question}</p>
-
-                  <div className="space-y-2">
-                    {m.quiz.options.map((opt, optIdx) => {
-                      const isSelected = m.quiz?.selectedOption === optIdx;
-                      const isAnswered = m.quiz?.selectedOption !== undefined;
-                      const isCorrect = optIdx === m.quiz?.correctIndex;
-
-                      let btnStyle = 'bg-slate-900 text-slate-200 border-slate-800 hover:bg-slate-800';
-                      if (isAnswered) {
-                        if (isCorrect) btnStyle = 'bg-emerald-950/80 text-emerald-300 border-emerald-500';
-                        else if (isSelected) btnStyle = 'bg-rose-950/80 text-rose-300 border-rose-500';
-                        else btnStyle = 'bg-slate-900/50 text-slate-500 border-slate-800';
-                      }
-
-                      return (
-                        <button
-                          key={optIdx}
-                          disabled={isAnswered}
-                          onClick={() => handleAnswerQuiz(m.id, optIdx)}
-                          className={`w-full p-3 rounded-xl border text-left text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${btnStyle}`}
-                        >
-                          <span>{opt}</span>
-                          {isAnswered && isCorrect && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
-                          {isAnswered && isSelected && !isCorrect && <XCircle className="w-4 h-4 text-rose-400" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {m.quiz.selectedOption !== undefined && (
-                    <p className="text-[11px] text-slate-300 bg-slate-900 p-3 rounded-xl border border-slate-800 leading-relaxed">
-                      💡 <strong>Explanation:</strong> {m.quiz.explanation}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
+            <button
+              onClick={() => {
+                setActiveMode('mnemonic');
+                playSound('toggle', soundEnabled);
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+                activeMode === 'mnemonic'
+                  ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30'
+                  : 'text-white/50 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5" /> Mnemonic
+            </button>
           </div>
-        ))}
+        </div>
 
-        {loading && (
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-2xl bg-purple-600 text-white flex items-center justify-center shadow-md">
-              <Bot className="w-4 h-4" />
-            </div>
-            <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 text-xs text-slate-400 flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin text-purple-400" />
-              Generating personalized chemistry response for {gradeLevel}...
-            </div>
+        {/* Active Element Quick-Action Header */}
+        <div className="py-2.5 px-4 rounded-xl bg-white/5 border border-white/10 my-3 flex flex-wrap items-center justify-between gap-3 shadow-inner">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-extrabold uppercase text-white/50">Context:</span>
+            <span className="px-2.5 py-1 rounded-md bg-purple-500/20 text-purple-200 font-mono text-xs font-bold border border-purple-500/30 shadow-sm">
+              {element1.name} ({element1.symbol}, Z={element1.atomicNumber})
+            </span>
           </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => handleQuickAction('explain')}
+              className="px-2.5 py-1.5 rounded-lg bg-black/20 hover:bg-purple-900/40 text-purple-200 border border-white/10 hover:border-purple-500/40 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+            >
+              <BookOpen className="w-3 h-3" /> Overview
+            </button>
+
+            <button
+              onClick={() => handleQuickAction('simplify')}
+              className="px-2.5 py-1.5 rounded-lg bg-black/20 hover:bg-amber-900/40 text-amber-200 border border-white/10 hover:border-amber-500/40 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+            >
+              <Lightbulb className="w-3 h-3" /> Simplify
+            </button>
+
+            <button
+              onClick={() => handleQuickAction('quiz')}
+              className="px-2.5 py-1.5 rounded-lg bg-black/20 hover:bg-emerald-900/40 text-emerald-200 border border-white/10 hover:border-emerald-500/40 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+            >
+              <Award className="w-3 h-3" /> Quiz
+            </button>
+
+            <button
+              onClick={() => handleQuickAction('mnemonic')}
+              className="px-2.5 py-1.5 rounded-lg bg-black/20 hover:bg-cyan-900/40 text-cyan-200 border border-white/10 hover:border-cyan-500/40 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+            >
+              <Zap className="w-3 h-3" /> Mnemonic
+            </button>
+
+            <button
+              onClick={() => handleQuickAction('spectroscopy')}
+              className="px-2.5 py-1.5 rounded-lg bg-black/20 hover:bg-indigo-900/40 text-indigo-200 border border-white/10 hover:border-indigo-500/40 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+            >
+              <Sparkles className="w-3 h-3" /> Emission
+            </button>
+          </div>
+        </div>
+
+        {/* Compare Panel Drawer */}
+        {activeMode === 'compare' && (
+          <TutorComparePanel
+            elementA={element1}
+            elementB={element2}
+            onSelectA={setElement1}
+            onSelectB={setElement2}
+            onRunComparison={handleRunComparison}
+            loading={loading}
+          />
         )}
-      </div>
 
-      {/* Suggested Prompts Pills */}
-      <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-2 border-t border-slate-800">
-        <span className="text-[10px] uppercase font-extrabold text-slate-400 shrink-0">Prompts:</span>
-        {[
-          `Why does electronegativity increase across period 3?`,
-          `How to balance redox equations using oxidation numbers?`,
-          `Explain hybrid orbitals sp, sp2, sp3 with molecular examples`,
-          `Create a mnemonic for reactivity series of metals`,
-        ].map((p, idx) => (
+        {/* Message Stream */}
+        <div className="flex-1 overflow-y-auto space-y-4 py-2 pr-1 min-h-[360px] scrollbar-none z-10">
+          {messages.map((m) => (
+            <TutorMessageItem
+              key={m.id}
+              message={m}
+              soundEnabled={soundEnabled}
+              onAnswerQuiz={handleAnswerQuiz}
+              onNextQuiz={handleNextQuiz}
+            />
+          ))}
+
+          {/* Loading Indicator */}
+          {loading && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-start gap-3"
+            >
+              <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-purple-500 to-indigo-600 text-white flex items-center justify-center shadow-lg animate-pulse border border-white/20">
+                <Brain className="w-4 h-4" />
+              </div>
+              <div className="p-3.5 rounded-2xl bg-black/40 border border-purple-500/30 text-xs text-purple-200 flex items-center gap-2.5 shadow-md backdrop-blur-md">
+                <Loader2 className="w-4 h-4 animate-spin text-purple-400" />
+                <span>Generating response via NVIDIA NIM (Llama 3.2 11B)...</span>
+              </div>
+            </motion.div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Quick Suggestion Chips above input */}
+        <div className="pt-3 pb-2 flex items-center gap-2 overflow-x-auto scrollbar-none border-t border-white/10 z-10">
+          <span className="text-[10px] uppercase font-black text-white/40 shrink-0">Try:</span>
+          {activeMode === 'quiz' && (
+            <button
+              onClick={() => handleSendMessage("Give me a random, challenging chemistry question")}
+              className="px-2.5 py-1 text-[11px] rounded-lg bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border border-purple-500/30 whitespace-nowrap transition-all cursor-pointer shadow-sm font-bold flex items-center gap-1.5"
+            >
+              <Sparkles className="w-3 h-3" /> Random Quiz Question
+            </button>
+          )}
+          {(activeMode === 'quiz'
+            ? [
+                `Transition metals oxidation states`,
+                `Noble gases and octet rule`,
+                `Periodic radius anomalies`,
+                `Electronegativity trend exceptions`,
+              ]
+            : [
+                `Why does Fluorine have the highest electronegativity?`,
+                `How to predict molecular geometry using VSEPR?`,
+                `Explain the flame test emission colors of Alkali Metals`,
+                `Why is Chromium [Ar] 3d5 4s1 an exception to Aufbau?`,
+              ]
+          ).map((suggestion, idx) => (
+            <button
+              key={idx}
+              onClick={() => handleSendMessage(suggestion)}
+              className="px-2.5 py-1 text-[11px] rounded-lg bg-black/20 hover:bg-white/10 text-white/60 hover:text-white border border-white/10 whitespace-nowrap transition-all cursor-pointer shadow-sm"
+            >
+              {suggestion}
+            </button>
+          ))}
+        </div>
+
+        {/* Input Bar */}
+        <div className="flex items-center gap-2 pt-1 z-10">
+          <div className="relative flex-1">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+              placeholder={
+                activeMode === 'quiz'
+                  ? 'Enter topic for instant practice quiz (e.g. Alkali Metals, Redox, Orbitals)...'
+                  : `Ask AI Tutor anything about chemistry at ${gradeLevel} level...`
+              }
+              className="w-full px-4 py-3 text-xs sm:text-sm rounded-2xl bg-black/40 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 shadow-inner backdrop-blur-md"
+            />
+          </div>
+
           <button
-            key={idx}
-            onClick={() => handleSendMessage(p)}
-            className="px-3 py-1.5 text-[11px] font-bold rounded-xl bg-slate-950 hover:bg-purple-950/60 text-slate-300 hover:text-purple-300 border border-slate-800 whitespace-nowrap transition-all cursor-pointer"
+            onClick={() => handleSendMessage()}
+            disabled={loading || !input.trim()}
+            className="px-5 py-3 rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-600 to-cyan-600 hover:opacity-95 text-white text-xs sm:text-sm font-extrabold flex items-center gap-2 shadow-xl shadow-purple-600/30 disabled:opacity-40 transition-all cursor-pointer border border-white/20"
           >
-            {p}
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            <span className="hidden sm:inline">Send</span>
           </button>
-        ))}
-      </div>
+        </div>
 
-      {/* Chat Input Bar */}
-      <div className="flex items-center gap-2 pt-2">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-          placeholder={
-            activeMode === 'quiz'
-              ? 'Enter quiz topic (e.g. Alkali Metals, Periodic Trends, Acid-Base)...'
-              : `Ask AI Tutor anything about chemistry at ${gradeLevel} level...`
-          }
-          className="flex-1 px-4 py-3.5 text-xs rounded-2xl bg-slate-950 border border-slate-800 text-slate-100 focus:outline-none focus:border-purple-500 shadow-inner"
-        />
-        <button
-          onClick={() => handleSendMessage()}
-          disabled={loading || !input.trim()}
-          className="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-black flex items-center gap-2 shadow-xl shadow-purple-600/30 disabled:opacity-50 transition-all cursor-pointer"
-        >
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-          Send
-        </button>
       </div>
-
     </div>
   );
 };

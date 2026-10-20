@@ -112,6 +112,10 @@ export interface Reaction {
   stepsExplanation?: { step: number; title: string; detail: string }[];
   activationEnergy?: number; // kJ/mol
   deltaH?: number; // kJ/mol (negative for exothermic, positive for endothermic)
+  entropyChange?: number; // J/(mol·K)
+  equilibriumType?: 'Reversible' | 'Irreversible';
+  phaseState?: 'Gas Phase' | 'Aqueous Solution' | 'Heterogeneous / Solid-Liquid' | 'High Temperature Plasma';
+  colorTheme?: { reactant1: string; reactant2: string; product: string };
 }
 
 export interface QuizQuestion {
