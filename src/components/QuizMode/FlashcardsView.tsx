@@ -40,10 +40,12 @@ type DeckType = 'all' | 'learning' | 'mastered' | 'starred';
 
 export const FlashcardsView: React.FC = () => {
   const {
-    addXp,
-    unlockAchievement,
     bookmarks,
     toggleBookmark,
+    masteredFlashcards: masteredIds,
+    reviewFlashcards: reviewIds,
+    markFlashcardMastered,
+    markFlashcardReview,
     setSelectedElement,
     soundEnabled,
   } = useAppStore();
@@ -52,8 +54,6 @@ export const FlashcardsView: React.FC = () => {
   const [categoryFilter, setCategoryFilter] = useState<ElementCategory | 'all'>('all');
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isFlipped, setIsFlipped] = useState<boolean>(false);
-  const [masteredIds, setMasteredIds] = useState<number[]>([]);
-  const [reviewIds, setReviewIds] = useState<number[]>([]);
 
   // Filter elements based on active deck and category
   const filteredElements = ELEMENTS.filter((el) => {
@@ -106,34 +106,17 @@ export const FlashcardsView: React.FC = () => {
 
   const markMastered = useCallback(() => {
     if (!currentElement) return;
-    const atomicNum = currentElement.atomicNumber;
     playSound('correct', soundEnabled);
-
-    // Remove from review, add to mastered
-    setReviewIds((prev) => prev.filter((id) => id !== atomicNum));
-    if (!masteredIds.includes(atomicNum)) {
-      const nextMastered = [...masteredIds, atomicNum];
-      setMasteredIds(nextMastered);
-      addXp(15);
-      if (nextMastered.length >= 10) {
-        unlockAchievement('flashcard_master');
-      }
-    }
+    markFlashcardMastered(currentElement.atomicNumber);
     handleNext();
-  }, [currentElement, masteredIds, addXp, unlockAchievement, handleNext, soundEnabled]);
+  }, [currentElement, markFlashcardMastered, handleNext, soundEnabled]);
 
   const markNeedsPractice = useCallback(() => {
     if (!currentElement) return;
-    const atomicNum = currentElement.atomicNumber;
     playSound('toggle', soundEnabled);
-
-    // Remove from mastered, ensure in review
-    setMasteredIds((prev) => prev.filter((id) => id !== atomicNum));
-    if (!reviewIds.includes(atomicNum)) {
-      setReviewIds((prev) => [...prev, atomicNum]);
-    }
+    markFlashcardReview(currentElement.atomicNumber);
     handleNext();
-  }, [currentElement, reviewIds, handleNext, soundEnabled]);
+  }, [currentElement, markFlashcardReview, handleNext, soundEnabled]);
 
   const handlePronounce = useCallback(
     (e: React.MouseEvent) => {

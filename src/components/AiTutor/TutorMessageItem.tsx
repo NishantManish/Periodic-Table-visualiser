@@ -143,9 +143,13 @@ export const TutorMessageItem: React.FC<TutorMessageItemProps> = ({
     );
   };
 
-  // Helper to format bold, code, chemical tags
+  // Helper to format bold, code, chemical tags safely after HTML-entity escaping (Fixes BUG-10)
   const formatInlineMarkdown = (text: string) => {
-    return text
+    const escaped = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    return escaped
       .replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-white">$1</strong>')
       .replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-300 font-mono text-[11px] border border-purple-500/30">$1</code>');
   };
@@ -180,7 +184,11 @@ export const TutorMessageItem: React.FC<TutorMessageItemProps> = ({
           {!isUser && message.model && (
             <span className="px-1.5 py-0.5 rounded-md bg-white/5 border border-white/10 text-[10px] text-purple-300 font-mono flex items-center gap-1 shadow-sm">
               <Zap className="w-2.5 h-2.5 text-amber-400" />
-              {message.provider === 'nvidia-nim' ? 'NVIDIA NIM' : 'Gemini'}
+              {message.provider === 'openrouter'
+                ? `OpenRouter (${message.model})`
+                : message.provider === 'nvidia-nim'
+                ? `NVIDIA NIM (${message.model})`
+                : message.model}
             </span>
           )}
           {!isUser && message.latencyMs !== undefined && (

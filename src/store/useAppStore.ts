@@ -68,12 +68,17 @@ interface AppState {
   xp: number;
   level: number;
   streak: number;
+  lastStudyDate: string;
   bookmarks: number[]; // atomic numbers
+  masteredFlashcards: number[]; // atomic numbers
+  reviewFlashcards: number[]; // atomic numbers
   notes: Record<number, string>; // atomic number -> note text
   achievements: Achievement[];
   
   addXp: (amount: number) => void;
   toggleBookmark: (atomicNumber: number) => void;
+  markFlashcardMastered: (atomicNumber: number) => void;
+  markFlashcardReview: (atomicNumber: number) => void;
   saveNote: (atomicNumber: number, note: string) => void;
   unlockAchievement: (id: string) => void;
 
@@ -101,7 +106,8 @@ export const useAppStore = create<AppState>()(
       // Default view
       viewMode: 'table',
       setViewMode: (mode) => {
-        set({ viewMode: mode });
+        const normalized = mode === 'molecule-builder' ? 'molecule-visualizer' : mode;
+        set({ viewMode: normalized });
       },
 
       // Element
@@ -155,7 +161,10 @@ export const useAppStore = create<AppState>()(
       xp: 120,
       level: 1,
       streak: 1,
+      lastStudyDate: new Date().toISOString().slice(0, 10),
       bookmarks: [1, 6, 8, 79], // H, C, O, Au bookmarked by default
+      masteredFlashcards: [],
+      reviewFlashcards: [],
       notes: {
         1: 'Hydrogen is the fuel of the stars! Stars fuse 4 H atoms into 1 He atom.',
         6: 'Carbon has 4 valence electrons allowing complex 3D organic scaffolds.',
@@ -163,9 +172,19 @@ export const useAppStore = create<AppState>()(
       achievements: INITIAL_ACHIEVEMENTS,
 
       addXp: (amount) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const prevDate = get().lastStudyDate;
+        let nextStreak = get().streak;
+        if (prevDate !== today) {
+          const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+          nextStreak = prevDate === yesterday ? nextStreak + 1 : 1;
+        }
         const newXp = get().xp + amount;
         const newLevel = Math.floor(newXp / 200) + 1;
-        set({ xp: newXp, level: newLevel });
+        set({ xp: newXp, level: newLevel, streak: nextStreak, lastStudyDate: today });
+        if (nextStreak >= 3) {
+          get().unlockAchievement('streak_3');
+        }
       },
 
       toggleBookmark: (atomicNumber) => {
@@ -175,6 +194,30 @@ export const useAppStore = create<AppState>()(
         } else {
           set({ bookmarks: [...current, atomicNumber] });
         }
+      },
+
+      markFlashcardMastered: (atomicNumber) => {
+        const currentMastered = get().masteredFlashcards;
+        const currentReview = get().reviewFlashcards.filter((id) => id !== atomicNumber);
+        if (!currentMastered.includes(atomicNumber)) {
+          const nextMastered = [...currentMastered, atomicNumber];
+          set({ masteredFlashcards: nextMastered, reviewFlashcards: currentReview });
+          get().addXp(15);
+          if (nextMastered.length >= 10) {
+            get().unlockAchievement('flashcard_master');
+          }
+        } else {
+          set({ reviewFlashcards: currentReview });
+        }
+      },
+
+      markFlashcardReview: (atomicNumber) => {
+        const currentMastered = get().masteredFlashcards.filter((id) => id !== atomicNumber);
+        const currentReview = get().reviewFlashcards;
+        const nextReview = currentReview.includes(atomicNumber)
+          ? currentReview
+          : [...currentReview, atomicNumber];
+        set({ masteredFlashcards: currentMastered, reviewFlashcards: nextReview });
       },
 
       saveNote: (atomicNumber, note) => {
@@ -227,7 +270,10 @@ export const useAppStore = create<AppState>()(
         xp: state.xp,
         level: state.level,
         streak: state.streak,
+        lastStudyDate: state.lastStudyDate,
         bookmarks: state.bookmarks,
+        masteredFlashcards: state.masteredFlashcards,
+        reviewFlashcards: state.reviewFlashcards,
         notes: state.notes,
         achievements: state.achievements,
         gradeLevel: state.gradeLevel,

@@ -547,7 +547,16 @@ export const PeriodicTrends: React.FC = () => {
             {/* Recharts Main Stage */}
             <div className="w-full h-full">
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={chartData} margin={{ top: 10, right: 30, bottom: 25, left: 10 }}>
+                <ComposedChart
+                  data={chartData}
+                  margin={{ top: 10, right: 30, bottom: 25, left: 10 }}
+                  onMouseMove={(state: any) => {
+                    const activeEl = state?.activePayload?.[0]?.payload?.element;
+                    if (activeEl && activeEl.atomicNumber !== hoveredElement?.atomicNumber) {
+                      setHoveredElement(activeEl);
+                    }
+                  }}
+                >
                   <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.3} />
                   <XAxis
                     dataKey="symbol"
@@ -576,7 +585,6 @@ export const PeriodicTrends: React.FC = () => {
                       if (active && payload && payload.length) {
                         const data = payload[0].payload;
                         const el: ElementData = data.element;
-                        setHoveredElement(el);
 
                         return (
                           <div className="bg-slate-950/95 border border-slate-800 p-3.5 rounded-2xl shadow-2xl backdrop-blur-md text-xs space-y-2 min-w-[200px]">

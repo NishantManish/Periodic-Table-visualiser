@@ -8,7 +8,7 @@ import { Loader2 } from 'lucide-react';
 
 const PeriodicGrid = lazy(() => import('@/components/PeriodicTable/PeriodicGrid').then(m => ({ default: m.PeriodicGrid })));
 const AtomViewer3D = lazy(() => import('@/components/Atom3D/AtomViewer3D').then(m => ({ default: m.AtomViewer3D })));
-const MoleculeBuilder = lazy(() => import('@/components/MoleculeBuilder/MoleculeBuilder').then(m => ({ default: m.MoleculeBuilder })));
+const MoleculeVisualizer = lazy(() => import('@/components/MoleculeVisualizer/MoleculeVisualizer').then(m => ({ default: m.MoleculeVisualizer })));
 const ReactionSimulator = lazy(() => import('@/components/ReactionSimulator/ReactionSimulator').then(m => ({ default: m.ReactionSimulator })));
 const PeriodicTrends = lazy(() => import('@/components/PeriodicTrends/PeriodicTrends').then(m => ({ default: m.PeriodicTrends })));
 const LearningDashboard = lazy(() => import('@/components/LearningDashboard/LearningDashboard').then(m => ({ default: m.LearningDashboard })));
@@ -51,7 +51,9 @@ export default function App() {
         <ToastProvider>
           <div
             className={`min-h-screen font-sans transition-colors relative ${
-              theme === 'dark' ? 'bg-slate-950 text-slate-100' : 'bg-slate-900 text-slate-100'
+              theme === 'dark'
+                ? 'bg-[#07090E] text-slate-100'
+                : 'bg-[#F8FAFC] text-slate-900'
             } ${highContrast ? 'contrast-125' : ''}`}
           >
             {/* Background Ambient Glow Effects */}
@@ -68,7 +70,7 @@ export default function App() {
                   <Suspense fallback={<SuspenseLoader />}>
                     {viewMode === 'table' && <PeriodicGrid />}
                     {viewMode === '3d-atom' && <AtomViewer3D />}
-                    {viewMode === 'molecule-builder' && <MoleculeBuilder />}
+                    {(viewMode === 'molecule-visualizer' || viewMode === 'molecule-builder') && <MoleculeVisualizer />}
                     {viewMode === 'reaction-simulator' && <ReactionSimulator />}
                     {viewMode === 'trends' && <PeriodicTrends />}
                     {viewMode === 'learning' && <LearningDashboard />}

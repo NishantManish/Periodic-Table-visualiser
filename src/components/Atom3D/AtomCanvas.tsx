@@ -1,21 +1,31 @@
-import React, { useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
+import React, { useRef, useMemo, useEffect } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, Html } from '@react-three/drei';
+import { OrbitControls, Sphere, Html, Torus } from '@react-three/drei';
 import * as THREE from 'three';
 import { ElementData } from '../../types';
+import {
+  buildSphericalHarmonicGeometry,
+  sampleOrbitalProbabilityCloud,
+  SpecificOrbitalSubshell,
+} from '../../utils/QuantumOrbitalEngine';
 
-const SHELL_NAMES = ['K (n=1)', 'L (n=2)', 'M (n=3)', 'N (n=4)', 'O (n=5)', 'P (n=6)', 'Q (n=7)'];
-
-interface AtomCanvasProps {
-  element: ElementData;
-  renderStyle: 'neon' | 'wireframe' | 'xray' | 'bohr' | 'standard';
-  orbitalType: 'bohr' | 's' | 'p' | 'd' | 'f' | 'all';
-  showNucleus: boolean;
-  showShells: boolean;
-  showLabels: boolean;
-  isPlaying: boolean;
-  rotationSpeed: number;
-}
+export type AtomRenderStyle = 'bohr' | 'quantum' | 'realistic' | 'neon' | 'wireframe' | 'xray';
+export type QuantumOrbitalType =
+  | 'bohr'
+  | 'all'
+  | 's'
+  | 'p'
+  | 'px'
+  | 'py'
+  | 'pz'
+  | 'd'
+  | 'dz2'
+  | 'dx2-y2'
+  | 'dxy'
+  | 'dxz'
+  | 'dyz'
+  | 'f';
+export type QuantumCloudMode = 'harmonics-lobes' | 'probability-cloud';
 
 export interface AtomCanvasRef {
   zoomIn: () => void;
@@ -23,334 +33,635 @@ export interface AtomCanvasRef {
   resetCamera: () => void;
 }
 
-// --- Declarative Materials (Prevents Memory Leaks & Crashes) ---
-const ParticleMaterial = ({ isProton, renderStyle }: { isProton: boolean, renderStyle: string }) => {
-  if (renderStyle === 'neon') return <meshBasicMaterial color={isProton ? '#ff0055' : '#0088ff'} />;
-  if (renderStyle === 'wireframe') return <meshBasicMaterial color={isProton ? '#ef4444' : '#3b82f6'} wireframe />;
-  if (renderStyle === 'xray') return <meshStandardMaterial color={isProton ? '#f87171' : '#60a5fa'} transparent opacity={0.45} roughness={0.1} />;
-  if (renderStyle === 'bohr') return <meshBasicMaterial color={isProton ? '#d97706' : '#2563eb'} />;
-  return <meshStandardMaterial color={isProton ? '#ef4444' : '#3b82f6'} roughness={0.2} metalness={0.6} emissive={isProton ? '#7f1d1d' : '#1e3a8a'} emissiveIntensity={0.3} />;
-};
+interface AtomCanvasProps {
+  element: ElementData;
+  isPlaying: boolean;
+  speed?: number;
+  rotationSpeed?: number;
+  showNucleus: boolean;
+  showShells: boolean;
+  showLabels: boolean;
+  renderStyle: AtomRenderStyle;
+  orbitalType?: QuantumOrbitalType;
+  quantumCloudMode?: QuantumCloudMode;
+  showNodalPlanes?: boolean;
+}
 
-const RingMaterial = ({ renderStyle }: { renderStyle: string }) => (
-  <meshBasicMaterial
-    color={renderStyle === 'neon' ? '#a855f7' : '#38bdf8'}
-    side={THREE.DoubleSide}
-    transparent
-    opacity={renderStyle === 'wireframe' ? 0.6 : 0.35}
-    wireframe={renderStyle === 'wireframe'}
-  />
-);
+const SHELL_COLORS = [
+  '#38bdf8', // K (n=1)
+  '#34d399', // L (n=2)
+  '#fbbf24', // M (n=3)
+  '#f87171', // N (n=4)
+  '#a78bfa', // O (n=5)
+  '#f472b6', // P (n=6)
+  '#60a5fa', // Q (n=7)
+];
 
-const ElectronMaterial = ({ renderStyle }: { renderStyle: string }) => {
-  if (renderStyle === 'neon') return <meshBasicMaterial color="#00ffff" />;
-  if (renderStyle === 'wireframe') return <meshBasicMaterial color="#38bdf8" wireframe />;
-  if (renderStyle === 'xray') return <meshStandardMaterial color="#38bdf8" transparent opacity={0.7} />;
-  if (renderStyle === 'bohr') return <meshBasicMaterial color="#06b6d4" />;
-  return <meshBasicMaterial color="#38bdf8" />;
-};
+const SHELL_NAMES = ['K', 'L', 'M', 'N', 'O', 'P', 'Q'];
 
-const OrbitalMaterial = ({ color = "#60a5fa", opacity = 0.15 }: { color?: string, opacity?: number }) => (
-  <meshStandardMaterial
-    color={color}
-    transparent
-    opacity={opacity}
-    roughness={0.4}
-    depthWrite={false}
-    blending={THREE.AdditiveBlending}
-    side={THREE.DoubleSide}
-  />
-);
+// ============================================================================
+// 1. PROPORTIONAL STOICHIOMETRIC NUCLEUS (WITH PROTIUM ¹H N=0 GUARD)
+// ============================================================================
+const Nucleus = ({
+  atomicNumber,
+  atomicMass,
+  isPlaying,
+  speed,
+}: {
+  atomicNumber: number;
+  atomicMass: number;
+  isPlaying: boolean;
+  speed: number;
+}) => {
+  const groupRef = useRef<THREE.Group>(null);
+  const protonMeshRef = useRef<THREE.InstancedMesh>(null);
+  const neutronMeshRef = useRef<THREE.InstancedMesh>(null);
 
-// --- Components ---
+  const { protons, neutrons, numProtons, numNeutrons } = useMemo(() => {
+    const pCount = atomicNumber;
+    const nCount = Math.max(0, Math.round(atomicMass) - atomicNumber);
+    const totalReal = Math.max(1, pCount + nCount);
+    const maxRender = Math.min(totalReal, 100);
 
-const Nucleus: React.FC<{ element: ElementData; renderStyle: string; showNucleus: boolean; showLabels: boolean; isMobile: boolean }> = ({ element, renderStyle, showNucleus, showLabels, isMobile }) => {
-  const protonRef = useRef<THREE.InstancedMesh>(null);
-  const neutronRef = useRef<THREE.InstancedMesh>(null);
+    const renderedProtons =
+      totalReal <= 100
+        ? pCount
+        : Math.max(1, Math.round((pCount / totalReal) * maxRender));
+    const renderedNeutrons =
+      nCount === 0
+        ? 0
+        : totalReal <= 100
+        ? nCount
+        : Math.max(0, maxRender - renderedProtons);
 
-  const protonCount = element.atomicNumber;
-  const neutronCount = Math.round(element.atomicMass) - protonCount;
-  const maxDisplayed = isMobile ? 40 : 80;
-  const totalParticles = Math.min(protonCount + neutronCount, maxDisplayed);
-  const numProtons = Math.ceil(totalParticles / 2);
-  const numNeutrons = totalParticles - numProtons;
+    const pPositions: [number, number, number][] = [];
+    const nPositions: [number, number, number][] = [];
 
-  useEffect(() => {
-    if (!showNucleus || !protonRef.current || !neutronRef.current) return;
-    
-    const dummy = new THREE.Object3D();
-    let pIdx = 0;
-    let nIdx = 0;
-    
-    for (let i = 0; i < totalParticles; i++) {
-      const isProton = i % 2 === 0;
-      const phi = Math.acos(-1 + (2 * i) / totalParticles);
-      const theta = Math.sqrt(totalParticles * Math.PI) * phi;
-      const radius = 0.52 * Math.pow(i / totalParticles, 0.35) + 0.12;
-      
-      dummy.position.set(
-        radius * Math.cos(theta) * Math.sin(phi),
-        radius * Math.sin(theta) * Math.sin(phi),
-        radius * Math.cos(phi)
-      );
-      dummy.updateMatrix();
-      
-      if (isProton && pIdx < numProtons) {
-        protonRef.current.setMatrixAt(pIdx++, dummy.matrix);
-      } else if (nIdx < numNeutrons) {
-        neutronRef.current.setMatrixAt(nIdx++, dummy.matrix);
+    const totalRendered = renderedProtons + renderedNeutrons;
+    const radius = totalRendered === 1 ? 0 : Math.pow(totalRendered, 1 / 3) * 0.22;
+    const phi = Math.PI * (3 - Math.sqrt(5));
+
+    const nucleons: Array<'p' | 'n'> = [];
+    for (let i = 0; i < renderedProtons; i++) nucleons.push('p');
+    for (let i = 0; i < renderedNeutrons; i++) nucleons.push('n');
+
+    for (let i = nucleons.length - 1; i > 0; i--) {
+      const j = (i * 17 + atomicNumber * 31) % (i + 1);
+      const tmp = nucleons[i];
+      nucleons[i] = nucleons[j];
+      nucleons[j] = tmp;
+    }
+
+    for (let i = 0; i < totalRendered; i++) {
+      if (totalRendered === 1) {
+        pPositions.push([0, 0, 0]);
+        break;
+      }
+      const y = 1 - (i / (totalRendered - 1)) * 2;
+      const r = Math.sqrt(Math.max(0, 1 - y * y));
+      const theta = phi * i;
+
+      const x = Math.cos(theta) * r;
+      const z = Math.sin(theta) * r;
+      const dist = radius * (0.78 + 0.22 * ((i % 5) / 4));
+      const pos: [number, number, number] = [x * dist, y * dist, z * dist];
+
+      if (nucleons[i] === 'p') {
+        pPositions.push(pos);
+      } else {
+        nPositions.push(pos);
       }
     }
-    
-    protonRef.current.instanceMatrix.needsUpdate = true;
-    neutronRef.current.instanceMatrix.needsUpdate = true;
-  }, [totalParticles, numProtons, numNeutrons, showNucleus]);
 
-  if (!showNucleus) return null;
+    return {
+      protons: pPositions,
+      neutrons: nPositions,
+      numProtons: pPositions.length,
+      numNeutrons: nPositions.length,
+    };
+  }, [atomicNumber, atomicMass]);
 
-  const radius = isMobile ? 0.28 : 0.22;
-  const segments = isMobile ? 10 : 16;
+  useEffect(() => {
+    const dummy = new THREE.Object3D();
+    if (protonMeshRef.current) {
+      protons.forEach((pos, i) => {
+        dummy.position.set(...pos);
+        dummy.updateMatrix();
+        protonMeshRef.current!.setMatrixAt(i, dummy.matrix);
+      });
+      protonMeshRef.current.instanceMatrix.needsUpdate = true;
+    }
+    if (neutronMeshRef.current && numNeutrons > 0) {
+      neutrons.forEach((pos, i) => {
+        dummy.position.set(...pos);
+        dummy.updateMatrix();
+        neutronMeshRef.current!.setMatrixAt(i, dummy.matrix);
+      });
+      neutronMeshRef.current.instanceMatrix.needsUpdate = true;
+    }
+  }, [protons, neutrons, numProtons, numNeutrons]);
+
+  useFrame((_, delta) => {
+    if (isPlaying && groupRef.current) {
+      groupRef.current.rotation.y += delta * 0.4 * speed;
+      groupRef.current.rotation.x += delta * 0.2 * speed;
+    }
+  });
 
   return (
-    <group>
-      <instancedMesh ref={protonRef} args={[null as any, null as any, numProtons]}>
-        <sphereGeometry args={[radius, segments, segments]} />
-        <ParticleMaterial isProton={true} renderStyle={renderStyle} />
+    <group ref={groupRef}>
+      <instancedMesh ref={protonMeshRef} args={[undefined, undefined, numProtons]}>
+        <sphereGeometry args={[0.25, 16, 16]} />
+        <meshStandardMaterial
+          color="#ef4444"
+          roughness={0.3}
+          metalness={0.2}
+          emissive="#ef4444"
+          emissiveIntensity={0.25}
+        />
       </instancedMesh>
-      <instancedMesh ref={neutronRef} args={[null as any, null as any, numNeutrons]}>
-        <sphereGeometry args={[radius, segments, segments]} />
-        <ParticleMaterial isProton={false} renderStyle={renderStyle} />
-      </instancedMesh>
-      {showLabels && (
-        <Html position={[0, 1.2, 0]} center style={{ pointerEvents: 'none' }}>
-          <div className="px-2 py-1 bg-slate-900/90 text-[10px] text-slate-200 rounded border border-slate-700 shadow-xl backdrop-blur-sm whitespace-nowrap transition-all">
-            Nucleus ({protonCount}P⁺, {neutronCount}N⁰)
-          </div>
-        </Html>
+      {numNeutrons > 0 && (
+        <instancedMesh ref={neutronMeshRef} args={[undefined, undefined, numNeutrons]}>
+          <sphereGeometry args={[0.25, 16, 16]} />
+          <meshStandardMaterial color="#64748b" roughness={0.4} metalness={0.2} />
+        </instancedMesh>
+      )}
+      <pointLight color="#ef4444" intensity={1.5} distance={6} />
+    </group>
+  );
+};
+
+// ============================================================================
+// 2. REAL SPHERICAL HARMONICS Y_l^m(θ, φ) & MONTE CARLO ENGINE
+// ============================================================================
+const ParametricHarmonicMesh = ({
+  orbital,
+  scale,
+  opacity = 0.58,
+}: {
+  orbital: SpecificOrbitalSubshell;
+  scale: number;
+  opacity?: number;
+}) => {
+  const geometry = useMemo(
+    () => buildSphericalHarmonicGeometry(orbital, scale),
+    [orbital, scale]
+  );
+
+  useEffect(() => {
+    return () => {
+      geometry.dispose();
+    };
+  }, [geometry]);
+
+  return (
+    <mesh geometry={geometry}>
+      <meshPhysicalMaterial
+        vertexColors
+        transparent
+        opacity={opacity}
+        roughness={0.18}
+        metalness={0.1}
+        clearcoat={0.75}
+        side={THREE.DoubleSide}
+        depthWrite={false}
+      />
+    </mesh>
+  );
+};
+
+// ============================================================================
+// 3. 15,000-POINT GPU MONTE CARLO PROBABILITY CLOUD |ψ_{nlm}(r, θ, φ)|²
+// ============================================================================
+const QuantumProbabilityCloud = ({
+  orbital,
+  principalN,
+  scale,
+}: {
+  orbital: QuantumOrbitalType;
+  principalN: number;
+  scale: number;
+}) => {
+  const { positions, colors } = useMemo(
+    () => sampleOrbitalProbabilityCloud(orbital, principalN, scale, 15000),
+    [orbital, principalN, scale]
+  );
+
+  return (
+    <points>
+      <bufferGeometry>
+        <bufferAttribute
+          attach="attributes-position"
+          count={positions.length / 3}
+          array={positions}
+          itemSize={3}
+        />
+        <bufferAttribute
+          attach="attributes-color"
+          count={colors.length / 3}
+          array={colors}
+          itemSize={3}
+        />
+      </bufferGeometry>
+      <pointsMaterial
+        size={0.075}
+        vertexColors
+        transparent
+        opacity={0.78}
+        depthWrite={false}
+        blending={THREE.AdditiveBlending}
+      />
+    </points>
+  );
+};
+
+// ============================================================================
+// 4. QUANTUM ORBITAL COMPOSITE VIEW (LOBES + CLOUD + NODAL PLANES)
+// ============================================================================
+const QuantumOrbitals = ({
+  element,
+  orbitalType,
+  quantumCloudMode = 'harmonics-lobes',
+  showNodalPlanes = false,
+  isPlaying,
+  speed,
+}: {
+  element: ElementData;
+  orbitalType: QuantumOrbitalType;
+  quantumCloudMode?: QuantumCloudMode;
+  showNodalPlanes?: boolean;
+  isPlaying: boolean;
+  speed: number;
+}) => {
+  const groupRef = useRef<THREE.Group>(null);
+
+  useFrame((_, delta) => {
+    if (isPlaying && groupRef.current) {
+      groupRef.current.rotation.y += delta * 0.32 * speed;
+    }
+  });
+
+  const hasP = element.atomicNumber >= 5;
+  const hasD = element.atomicNumber >= 21;
+  const hasF = element.atomicNumber >= 57;
+  const maxS = Math.min(element.period, 4);
+
+  return (
+    <group ref={groupRef}>
+      {quantumCloudMode === 'probability-cloud' ? (
+        <QuantumProbabilityCloud
+          orbital={orbitalType}
+          principalN={element.period}
+          scale={5.2}
+        />
+      ) : (
+        <>
+          {/* s-Orbitals with concentric radial nodes (1s, 2s, 3s) */}
+          {(orbitalType === 'all' || orbitalType === 's') &&
+            Array.from({ length: maxS }).map((_, idx) => {
+              const rScale = 1.9 + idx * 1.15;
+              const isPositivePhase = idx % 2 === 0;
+              return (
+                <Sphere key={`s-${idx}`} args={[rScale, 40, 40]}>
+                  <meshPhysicalMaterial
+                    color={isPositivePhase ? '#38bdf8' : '#f43f5e'}
+                    transparent
+                    opacity={orbitalType === 's' ? 0.24 - idx * 0.04 : 0.12}
+                    roughness={0.2}
+                    wireframe={idx > 0 && orbitalType === 'all'}
+                    depthWrite={false}
+                  />
+                </Sphere>
+              );
+            })}
+
+          {/* p-Orbitals (pz, px, py) */}
+          {orbitalType === 'pz' && <ParametricHarmonicMesh orbital="pz" scale={5.2} />}
+          {orbitalType === 'px' && <ParametricHarmonicMesh orbital="px" scale={5.2} />}
+          {orbitalType === 'py' && <ParametricHarmonicMesh orbital="py" scale={5.2} />}
+          {(orbitalType === 'p' || (orbitalType === 'all' && hasP)) && (
+            <group>
+              <ParametricHarmonicMesh
+                orbital="pz"
+                scale={4.8}
+                opacity={orbitalType === 'p' ? 0.55 : 0.35}
+              />
+              <ParametricHarmonicMesh
+                orbital="px"
+                scale={4.8}
+                opacity={orbitalType === 'p' ? 0.55 : 0.35}
+              />
+              <ParametricHarmonicMesh
+                orbital="py"
+                scale={4.8}
+                opacity={orbitalType === 'p' ? 0.55 : 0.35}
+              />
+            </group>
+          )}
+
+          {/* d-Orbitals (dz2, dx2-y2, dxy, dxz, dyz) */}
+          {orbitalType === 'dz2' && <ParametricHarmonicMesh orbital="dz2" scale={5.6} />}
+          {orbitalType === 'dx2-y2' && <ParametricHarmonicMesh orbital="dx2-y2" scale={5.6} />}
+          {orbitalType === 'dxy' && <ParametricHarmonicMesh orbital="dxy" scale={5.6} />}
+          {orbitalType === 'dxz' && <ParametricHarmonicMesh orbital="dxz" scale={5.6} />}
+          {orbitalType === 'dyz' && <ParametricHarmonicMesh orbital="dyz" scale={5.6} />}
+          {(orbitalType === 'd' || (orbitalType === 'all' && hasD)) && (
+            <group>
+              <ParametricHarmonicMesh
+                orbital="dz2"
+                scale={5.4}
+                opacity={orbitalType === 'd' ? 0.56 : 0.38}
+              />
+              <ParametricHarmonicMesh
+                orbital="dx2-y2"
+                scale={5.2}
+                opacity={orbitalType === 'd' ? 0.45 : 0.28}
+              />
+            </group>
+          )}
+
+          {/* f-Orbitals (l=3) */}
+          {(orbitalType === 'f' || (orbitalType === 'all' && hasF)) && (
+            <ParametricHarmonicMesh
+              orbital="f"
+              scale={6.0}
+              opacity={orbitalType === 'f' ? 0.58 : 0.36}
+            />
+          )}
+        </>
+      )}
+
+      {/* Translucent Nodal Planes & Radial Nodes (ψ = 0 surfaces) */}
+      {showNodalPlanes && (
+        <group>
+          {/* xy Nodal Plane (for pz, dz2, dxz, dyz) */}
+          {(orbitalType === 'pz' ||
+            orbitalType === 'p' ||
+            orbitalType === 'dz2' ||
+            orbitalType === 'dxz' ||
+            orbitalType === 'dyz' ||
+            orbitalType === 'all') && (
+            <mesh rotation={[Math.PI / 2, 0, 0]}>
+              <planeGeometry args={[9.5, 9.5]} />
+              <meshBasicMaterial
+                color="#fbbf24"
+                transparent
+                opacity={0.18}
+                side={THREE.DoubleSide}
+                depthWrite={false}
+              />
+            </mesh>
+          )}
+          {/* yz Nodal Plane (for px, dxy, dxz) */}
+          {(orbitalType === 'px' || orbitalType === 'dxy' || orbitalType === 'dxz') && (
+            <mesh rotation={[0, Math.PI / 2, 0]}>
+              <planeGeometry args={[9.5, 9.5]} />
+              <meshBasicMaterial
+                color="#34d399"
+                transparent
+                opacity={0.18}
+                side={THREE.DoubleSide}
+                depthWrite={false}
+              />
+            </mesh>
+          )}
+          {/* Radial Node Sphere for 2s/3s */}
+          {orbitalType === 's' && element.period >= 2 && (
+            <Sphere args={[2.45, 32, 32]}>
+              <meshBasicMaterial color="#fbbf24" wireframe transparent opacity={0.35} />
+            </Sphere>
+          )}
+        </group>
       )}
     </group>
   );
 };
 
-const ElectronShells: React.FC<{ element: ElementData; renderStyle: string; showShells: boolean; showLabels: boolean; isPlaying: boolean; rotationSpeed: number; isMobile: boolean }> = ({ element, renderStyle, showShells, showLabels, isPlaying, rotationSpeed, isMobile }) => {
-  const electronGroups = useRef<(THREE.Group | null)[]>([]);
+// ============================================================================
+// 5. BOHR SHELLS & ELECTRONS
+// ============================================================================
+const ElectronShell = ({
+  shellIndex,
+  electronCount,
+  radius,
+  color,
+  isPlaying,
+  speed,
+  showShells,
+  showLabels,
+}: {
+  shellIndex: number;
+  electronCount: number;
+  radius: number;
+  color: string;
+  isPlaying: boolean;
+  speed: number;
+  showShells: boolean;
+  showLabels: boolean;
+}) => {
+  const groupRef = useRef<THREE.Group>(null);
 
-  useFrame(() => {
-    if (!isPlaying) return;
-    electronGroups.current.forEach((group, i) => {
-      if (group) {
-        const speed = (2.5 / (i + 1)) * 0.05 * rotationSpeed;
-        group.rotation.z -= speed; 
-      }
-    });
-  });
+  const tilt = useMemo(() => {
+    const angle = (shellIndex * Math.PI) / 6;
+    return new THREE.Euler(
+      Math.sin(angle) * 0.35,
+      Math.cos(angle) * 0.35,
+      (shellIndex % 2 === 0 ? 1 : -1) * 0.2
+    );
+  }, [shellIndex]);
 
-  if (!showShells) return null;
-
-  return (
-    <group>
-      {element.bohrShells.map((electronCount, sIndex) => {
-        const shellRadius = 1.8 + sIndex * 1.35;
-        const ringSegments = isMobile ? 32 : 64;
-        const electronSegments = isMobile ? 12 : 16;
-
-        const electrons = Array.from({ length: electronCount }).map((_, eIndex) => {
-          const angle = (eIndex / electronCount) * Math.PI * 2;
-          return {
-            x: shellRadius * Math.cos(angle),
-            y: shellRadius * Math.sin(angle), // Using Y because the parent is rotated by X (Math.PI/2)
-          };
-        });
-
-        return (
-          <group key={sIndex} rotation-x={Math.PI / 2}>
-            {/* Static Orbit Ring */}
-            <mesh>
-              <ringGeometry args={[shellRadius - 0.025, shellRadius + 0.025, ringSegments]} />
-              <RingMaterial renderStyle={renderStyle} />
-            </mesh>
-            
-            {/* Revolving Electrons Group */}
-            <group ref={(el) => { electronGroups.current[sIndex] = el; }}>
-              {electrons.map((pos, eIndex) => (
-                <mesh key={eIndex} position={[pos.x, pos.y, 0]}>
-                  <sphereGeometry args={[0.13, electronSegments, electronSegments]} />
-                  <ElectronMaterial renderStyle={renderStyle} />
-                </mesh>
-              ))}
-            </group>
-
-            {/* Static Labels */}
-            {showLabels && (
-              <Html position={[shellRadius * Math.cos(sIndex), shellRadius * Math.sin(sIndex), 0]} center style={{ pointerEvents: 'none' }}>
-                <div className="px-2 py-1 bg-slate-900/90 text-[10px] text-cyan-300 font-mono rounded border border-cyan-800/50 shadow-xl backdrop-blur-sm whitespace-nowrap transition-all">
-                  Shell {SHELL_NAMES[sIndex]} ({electronCount}e⁻)
-                </div>
-              </Html>
-            )}
-          </group>
-        );
-      })}
-    </group>
-  );
-};
-
-const QuantumOrbitals: React.FC<{ element: ElementData; orbitalType: string; isMobile: boolean }> = ({ element, orbitalType, isMobile }) => {
-  const orbitalGroup = useRef<THREE.Group>(null);
-  
-  useFrame((state) => {
-    if (orbitalGroup.current) {
-      orbitalGroup.current.rotation.y = state.clock.elapsedTime * 0.1;
-      orbitalGroup.current.rotation.z = state.clock.elapsedTime * 0.05;
+  useFrame((_, delta) => {
+    if (isPlaying && groupRef.current) {
+      const angularSpeed = (1.6 / Math.pow(shellIndex + 1, 0.75)) * speed;
+      groupRef.current.rotation.z += delta * angularSpeed;
     }
   });
 
-  if (orbitalType === 'bohr') return null;
-
-  const segments = isMobile ? 24 : 32;
-
-  const showS = ['s', 'all'].includes(orbitalType);
-  const showP = ['p', 'all'].includes(orbitalType);
-  const showD = ['d', 'all'].includes(orbitalType);
-  const showF = ['f', 'all'].includes(orbitalType);
-
-  return (
-    <group ref={orbitalGroup}>
-      {element.bohrShells.map((count, i) => {
-        const n = i + 1; // Principal quantum number
-        const shellRadius = 1.8 + i * 1.35; // Matches Bohr shell radius exactly!
-        
-        // Only render orbitals that this shell actually has
-        const hasS = count > 0;
-        const hasP = n >= 2 && count > 2;
-        const hasD = n >= 3 && count > 8;
-        const hasF = n >= 4 && count > 18;
-
-        return (
-          <group key={`shell-${n}`}>
-            {/* s-Orbital (Spherical probability cloud) */}
-            {(showS || orbitalType === 'all') && hasS && (
-              <mesh>
-                <sphereGeometry args={[shellRadius * 0.95, segments, segments]} />
-                <OrbitalMaterial color="#38bdf8" opacity={0.08 + (0.02 * n)} />
-              </mesh>
-            )}
-            
-            {/* p-Orbital (Dumbbells) */}
-            {(showP || orbitalType === 'all') && hasP && (
-              <group>
-                {[ 
-                  [shellRadius, 0, 0], [-shellRadius, 0, 0], 
-                  [0, shellRadius, 0], [0, -shellRadius, 0], 
-                  [0, 0, shellRadius], [0, 0, -shellRadius] 
-                ].map((pos, j) => (
-                  <mesh key={`p-${n}-${j}`} position={pos as [number, number, number]}>
-                    <sphereGeometry args={[shellRadius * 0.45, segments/2, segments/2]} />
-                    <OrbitalMaterial color="#a855f7" opacity={0.12} />
-                  </mesh>
-                ))}
-              </group>
-            )}
-
-            {/* d-Orbital (Cloverleaves) */}
-            {(showD || orbitalType === 'all') && hasD && (
-              <group>
-                {[ 
-                  [shellRadius*0.7, shellRadius*0.7, 0], [shellRadius*0.7, -shellRadius*0.7, 0], [-shellRadius*0.7, shellRadius*0.7, 0], [-shellRadius*0.7, -shellRadius*0.7, 0],
-                  [shellRadius*0.7, 0, shellRadius*0.7], [shellRadius*0.7, 0, -shellRadius*0.7], [-shellRadius*0.7, 0, shellRadius*0.7], [-shellRadius*0.7, 0, -shellRadius*0.7],
-                  [0, shellRadius*0.7, shellRadius*0.7], [0, shellRadius*0.7, -shellRadius*0.7], [0, -shellRadius*0.7, shellRadius*0.7], [0, -shellRadius*0.7, -shellRadius*0.7]
-                ].map((pos, j) => (
-                  <mesh key={`d-${n}-${j}`} position={pos as [number, number, number]}>
-                    <sphereGeometry args={[shellRadius * 0.35, segments/2, segments/2]} />
-                    <OrbitalMaterial color="#4ade80" opacity={0.10} />
-                  </mesh>
-                ))}
-              </group>
-            )}
-
-            {/* f-Orbital (Complex shapes) */}
-            {(showF || orbitalType === 'all') && hasF && (
-              <group>
-                {[
-                  [shellRadius*0.6, shellRadius*0.6, shellRadius*0.6], [shellRadius*0.6, shellRadius*0.6, -shellRadius*0.6], 
-                  [shellRadius*0.6, -shellRadius*0.6, shellRadius*0.6], [shellRadius*0.6, -shellRadius*0.6, -shellRadius*0.6],
-                  [-shellRadius*0.6, shellRadius*0.6, shellRadius*0.6], [-shellRadius*0.6, shellRadius*0.6, -shellRadius*0.6], 
-                  [-shellRadius*0.6, -shellRadius*0.6, shellRadius*0.6], [-shellRadius*0.6, -shellRadius*0.6, -shellRadius*0.6]
-                ].map((pos, j) => (
-                  <mesh key={`f-${n}-${j}`} position={pos as [number, number, number]}>
-                    <sphereGeometry args={[shellRadius * 0.25, segments/2, segments/2]} />
-                    <OrbitalMaterial color="#facc15" opacity={0.10} />
-                  </mesh>
-                ))}
-              </group>
-            )}
-          </group>
-        );
-      })}
-    </group>
-  );
-};
-
-const SceneController = forwardRef<AtomCanvasRef>((_, ref) => {
-  const { camera, invalidate } = useThree();
-  const controlsRef = useRef<any>(null);
-
-  useImperativeHandle(ref, () => ({
-    zoomIn: () => {
-      camera.position.multiplyScalar(0.85);
-      controlsRef.current?.update();
-      invalidate();
-    },
-    zoomOut: () => {
-      camera.position.multiplyScalar(1.18);
-      controlsRef.current?.update();
-      invalidate();
-    },
-    resetCamera: () => {
-      camera.position.set(0, 4, 13);
-      controlsRef.current?.target.set(0, 0, 0);
-      controlsRef.current?.update();
-      invalidate();
+  const electrons = useMemo(() => {
+    const arr = [];
+    for (let i = 0; i < electronCount; i++) {
+      const angle = (i / electronCount) * Math.PI * 2;
+      arr.push({
+        x: Math.cos(angle) * radius,
+        y: Math.sin(angle) * radius,
+        id: i,
+      });
     }
-  }));
+    return arr;
+  }, [electronCount, radius]);
 
   return (
-    <OrbitControls 
-      ref={controlsRef}
-      makeDefault
-      enableDamping
-      dampingFactor={0.08}
-      rotateSpeed={1.0}
-      zoomSpeed={1.2}
-      panSpeed={0.8}
-      minDistance={2}
-      maxDistance={50}
-    />
-  );
-});
+    <group rotation={tilt}>
+      {showShells && (
+        <Torus args={[radius, 0.025, 16, 100]}>
+          <meshBasicMaterial color={color} transparent opacity={0.32} />
+        </Torus>
+      )}
 
-export const AtomCanvas = forwardRef<AtomCanvasRef, AtomCanvasProps>(({ element, renderStyle, orbitalType, showNucleus, showShells, showLabels, isPlaying, rotationSpeed }, ref) => {
-  const isMobile = window.innerWidth < 768;
+      {showLabels && showShells && (
+        <Html position={[radius, 0, 0]} center distanceFactor={15}>
+          <div
+            className="px-1.5 py-0.5 rounded bg-slate-900/90 border text-[10px] font-mono whitespace-nowrap pointer-events-none select-none shadow-md"
+            style={{ borderColor: `${color}66`, color }}
+          >
+            {SHELL_NAMES[shellIndex]} (n={shellIndex + 1}): {electronCount}e⁻
+          </div>
+        </Html>
+      )}
 
-  return (
-    <Canvas
-      camera={{ position: [0, 4, 13], fov: 50 }}
-      dpr={[1, isMobile ? 1.25 : 2]}
-      gl={{ antialias: !isMobile, alpha: true, powerPreference: 'high-performance' }}
-      frameloop={isPlaying ? "always" : "demand"}
-    >
-      <fogExp2 attach="fog" color={0x020617} density={0.015} />
-      <ambientLight intensity={renderStyle === 'neon' ? 1.2 : 0.8} />
-      <pointLight color={0x38bdf8} intensity={3} distance={60} position={[0, 0, 0]} />
-      <directionalLight color={0xffffff} intensity={1.5} position={[10, 15, 10]} />
-      
-      <SceneController ref={ref} />
-      
-      <group>
-        <Nucleus element={element} renderStyle={renderStyle} showNucleus={showNucleus} showLabels={showLabels} isMobile={isMobile} />
-        <ElectronShells element={element} renderStyle={renderStyle} showShells={showShells} showLabels={showLabels} isPlaying={isPlaying} rotationSpeed={rotationSpeed} isMobile={isMobile} />
-        <QuantumOrbitals element={element} orbitalType={orbitalType} isMobile={isMobile} />
+      <group ref={groupRef}>
+        {electrons.map((el) => (
+          <group key={el.id} position={[el.x, el.y, 0]}>
+            <Sphere args={[0.14, 16, 16]}>
+              <meshStandardMaterial
+                color={color}
+                emissive={color}
+                emissiveIntensity={1.6}
+                roughness={0.1}
+              />
+            </Sphere>
+            <Sphere args={[0.26, 12, 12]}>
+              <meshBasicMaterial color={color} transparent opacity={0.25} />
+            </Sphere>
+          </group>
+        ))}
       </group>
-    </Canvas>
+    </group>
   );
-});
+};
+
+/**
+ * Demand-Driven Canvas Invalidator so orbitalType, renderStyle, and nodal toggles
+ * re-render immediately even when isPlaying === false.
+ */
+const SceneInvalidator = ({ deps }: { deps: unknown[] }) => {
+  const { invalidate } = useThree();
+  useEffect(() => {
+    invalidate();
+  }, [invalidate, ...deps]);
+  return null;
+};
+
+export const AtomCanvas = React.forwardRef<AtomCanvasRef, AtomCanvasProps>(
+  (
+    {
+      element,
+      isPlaying,
+      speed = 1,
+      rotationSpeed,
+      showNucleus,
+      showShells,
+      showLabels,
+      renderStyle,
+      orbitalType = 'bohr',
+      quantumCloudMode = 'harmonics-lobes',
+      showNodalPlanes = false,
+    },
+    ref
+  ) => {
+    const effectiveSpeed = rotationSpeed ?? speed;
+    const shells = element.bohrShells;
+    const maxRadius = Math.max(shells.length * 1.45 + 1.5, 6);
+    const defaultCameraZ = Math.max(11, maxRadius * 2.15);
+    const controlsRef = useRef<any>(null);
+
+    React.useImperativeHandle(ref, () => ({
+      zoomIn: () => {
+        if (controlsRef.current?.object) {
+          controlsRef.current.object.position.multiplyScalar(0.84);
+          controlsRef.current.update();
+        }
+      },
+      zoomOut: () => {
+        if (controlsRef.current?.object) {
+          controlsRef.current.object.position.multiplyScalar(1.18);
+          controlsRef.current.update();
+        }
+      },
+      resetCamera: () => {
+        if (controlsRef.current?.object) {
+          controlsRef.current.object.position.set(0, 0, defaultCameraZ);
+          controlsRef.current.target.set(0, 0, 0);
+          controlsRef.current.update();
+        }
+      },
+    }));
+
+    const showQuantumView = orbitalType !== 'bohr' || renderStyle === 'quantum';
+    const effectiveOrbital: QuantumOrbitalType =
+      orbitalType === 'bohr' ? 'all' : orbitalType;
+
+    return (
+      <div
+        data-dark-stage="true"
+        className="w-full h-full relative bg-radial from-slate-900 via-slate-950 to-black rounded-2xl overflow-hidden border border-slate-800 shadow-2xl"
+      >
+        <Canvas
+          camera={{ position: [0, 0, defaultCameraZ], fov: 45 }}
+          frameloop={isPlaying ? 'always' : 'demand'}
+          dpr={[1, 2]}
+        >
+          <SceneInvalidator
+            deps={[
+              element.atomicNumber,
+              renderStyle,
+              orbitalType,
+              quantumCloudMode,
+              showNodalPlanes,
+              showNucleus,
+              showShells,
+              showLabels,
+            ]}
+          />
+          <ambientLight intensity={0.65} />
+          <directionalLight position={[10, 10, 10]} intensity={1.2} />
+          <directionalLight position={[-10, -10, -10]} intensity={0.5} color="#38bdf8" />
+
+          <OrbitControls
+            ref={controlsRef}
+            enablePan={true}
+            enableZoom={true}
+            enableRotate={true}
+            minDistance={3}
+            maxDistance={40}
+          />
+
+          {showNucleus && (
+            <Nucleus
+              atomicNumber={element.atomicNumber}
+              atomicMass={element.atomicMass}
+              isPlaying={isPlaying}
+              speed={effectiveSpeed}
+            />
+          )}
+
+          {!showQuantumView ? (
+            shells.map((electronCount, index) => (
+              <ElectronShell
+                key={index}
+                shellIndex={index}
+                electronCount={electronCount}
+                radius={(index + 1) * 1.45 + 0.8}
+                color={SHELL_COLORS[index % SHELL_COLORS.length]}
+                isPlaying={isPlaying}
+                speed={effectiveSpeed}
+                showShells={showShells}
+                showLabels={showLabels}
+              />
+            ))
+          ) : (
+            <QuantumOrbitals
+              element={element}
+              orbitalType={effectiveOrbital}
+              quantumCloudMode={quantumCloudMode}
+              showNodalPlanes={showNodalPlanes}
+              isPlaying={isPlaying}
+              speed={effectiveSpeed}
+            />
+          )}
+        </Canvas>
+      </div>
+    );
+  }
+);
+AtomCanvas.displayName = 'AtomCanvas';

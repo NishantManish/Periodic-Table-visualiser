@@ -24,6 +24,7 @@ import { TutorSidebar } from './TutorSidebar';
 import { TutorMessageItem, TutorMessage } from './TutorMessageItem';
 import { TutorComparePanel } from './TutorComparePanel';
 import { playSound } from '../../utils/audio';
+import { useToast } from '../ui/Toast';
 
 export const AiTutorView: React.FC = () => {
   const {
@@ -33,7 +34,10 @@ export const AiTutorView: React.FC = () => {
     setGradeLevel,
     unlockAchievement,
     addXp,
+    soundEnabled,
+    toggleSound,
   } = useAppStore();
+  const { toast } = useToast();
 
   // Active elements for tutoring & comparison
   const [element1, setElement1] = useState<ElementData>(selectedElement || ELEMENTS[0]);
@@ -42,8 +46,7 @@ export const AiTutorView: React.FC = () => {
   // Active Tab Mode: 'ask' | 'deep-dive' | 'compare' | 'quiz' | 'mnemonic'
   const [activeMode, setActiveMode] = useState<'ask' | 'deep-dive' | 'compare' | 'quiz' | 'mnemonic'>('ask');
 
-  // Sound and Sidebar visibility
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  // Sidebar visibility
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Messages state
@@ -277,6 +280,11 @@ What would you like to explore today?
     link.download = `chemistry-study-notes-${new Date().toISOString().slice(0, 10)}.txt`;
     link.click();
     URL.revokeObjectURL(url);
+    toast(
+      'Transcript Exported',
+      `Downloaded ${messages.length} AI Tutor messages as a study transcript.`,
+      'success'
+    );
   };
 
   // Clear Chat
@@ -314,7 +322,7 @@ What would you like to explore today?
               gradeLevel={gradeLevel}
               onGradeLevelChange={setGradeLevel}
               soundEnabled={soundEnabled}
-              onToggleSound={() => setSoundEnabled(!soundEnabled)}
+              onToggleSound={toggleSound}
               onQuickPrompt={(p, m) => handleSendMessage(p, m)}
               onExportNotes={handleExportNotes}
               onClearChat={handleClearChat}

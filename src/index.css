@@ -1,47 +1,134 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+:root,
+html.light {
+  --bg-canvas: #f8fafc;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f1f5f9;
+  --bg-subtle: #e2e8f0;
+  --text-primary: #0f172a;
+  --text-secondary: #1e293b;
+  --text-muted: #475569;
+  --border-hairline: #cbd5e1;
+  --border-strong: #94a3b8;
+  --accent-primary: #0284c7;
+  --accent-secondary: #4f46e5;
+  --panel-bg: rgba(255, 255, 255, 0.96);
+  --panel-border: #cbd5e1;
+  --panel-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.06), 0 1px 3px 0 rgba(15, 23, 42, 0.04);
+}
+
+html.dark {
+  --bg-canvas: #07090e;
+  --bg-surface: #0f172a;
+  --bg-elevated: #1e293b;
+  --bg-subtle: #0b0f19;
+  --text-primary: #f8fafc;
+  --text-secondary: #e2e8f0;
+  --text-muted: #94a3b8;
+  --border-hairline: #1e293b;
+  --border-strong: #334155;
+  --accent-primary: #06b6d4;
+  --accent-secondary: #6366f1;
+  --panel-bg: rgba(15, 23, 42, 0.85);
+  --panel-border: rgba(255, 255, 255, 0.12);
+  --panel-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.45);
+}
+
+/* Font scaling support (BUG-13) */
+html[data-font-scale="normal"] {
+  font-size: 16px;
+}
+html[data-font-scale="large"] {
+  font-size: 17.5px;
+}
+html[data-font-scale="xlarge"] {
+  font-size: 19px;
+}
+
+/* Reduced motion support (BUG-13) */
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* High contrast mode (BUG-13) */
+html.high-contrast.light {
+  --bg-canvas: #ffffff;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f1f5f9;
+  --text-primary: #000000;
+  --text-secondary: #0f172a;
+  --text-muted: #1e293b;
+  --border-hairline: #475569;
+  --border-strong: #0f172a;
+  --panel-border: #334155;
+}
+
+html.high-contrast.dark {
+  --bg-canvas: #000000;
+  --bg-surface: #090d16;
+  --bg-elevated: #1e293b;
+  --text-primary: #ffffff;
+  --text-secondary: #f8fafc;
+  --text-muted: #cbd5e1;
+  --border-hairline: #64748b;
+  --border-strong: #cbd5e1;
+  --panel-border: rgba(255, 255, 255, 0.35);
+}
+
 @layer utilities {
-  /* Custom scrollbar */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
   }
   ::-webkit-scrollbar-track {
-    background: rgba(0, 0, 0, 0);
+    background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(100, 116, 139, 0.35);
     border-radius: 9999px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.3);
+    background: rgba(100, 116, 139, 0.55);
   }
 
-  /* VisionOS / Apple Glassmorphism styles */
   .glass-panel {
-    background: rgba(15, 23, 42, 0.55);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    background: var(--panel-bg);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    border: 1px solid var(--panel-border);
+    box-shadow: var(--panel-shadow);
   }
 
   .glass-panel-glow {
-    background: rgba(15, 23, 42, 0.65);
-    backdrop-filter: blur(32px) saturate(200%);
-    -webkit-backdrop-filter: blur(32px) saturate(200%);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    box-shadow: 0 0 40px -10px rgba(56, 189, 248, 0.2);
+    background: var(--panel-bg);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid var(--panel-border);
+    box-shadow: var(--panel-shadow), 0 0 32px -10px rgba(6, 182, 212, 0.18);
   }
 }
 
-/* Background ambient mesh animation */
 body {
-  background-color: #030712; /* Deep space dark (slate-950) */
-  color: #f8fafc;
+  background-color: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .ambient-glow-bg {
@@ -49,11 +136,218 @@ body {
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  background: 
-    radial-gradient(circle at 15% 50%, rgba(30, 64, 175, 0.15) 0%, transparent 50%),
-    radial-gradient(circle at 85% 30%, rgba(88, 28, 135, 0.12) 0%, transparent 50%),
-    radial-gradient(circle at 50% 80%, rgba(2, 132, 199, 0.1) 0%, transparent 50%);
-  transform: translateZ(0); /* Hardware acceleration */
-  will-change: background;
+  transform: translateZ(0);
 }
 
+html.dark .ambient-glow-bg {
+  background:
+    radial-gradient(circle at 12% 20%, rgba(6, 182, 212, 0.08) 0%, transparent 45%),
+    radial-gradient(circle at 88% 25%, rgba(79, 70, 229, 0.08) 0%, transparent 45%),
+    radial-gradient(circle at 50% 85%, rgba(14, 165, 233, 0.06) 0%, transparent 50%);
+}
+
+html.light .ambient-glow-bg {
+  background:
+    radial-gradient(circle at 12% 20%, rgba(2, 132, 199, 0.04) 0%, transparent 45%),
+    radial-gradient(circle at 88% 25%, rgba(79, 70, 229, 0.04) 0%, transparent 45%),
+    radial-gradient(circle at 50% 85%, rgba(16, 185, 129, 0.03) 0%, transparent 50%);
+}
+
+/* ============================================================================
+   DARK MODE LEGIBILITY ENHANCEMENT
+   Boosts overly faint text-white/40 and text-white/50 so Dark Mode never suffers
+   from low-contrast dim labels.
+   ============================================================================ */
+html.dark .text-white\/40 {
+  color: rgba(226, 232, 240, 0.72) !important;
+}
+html.dark .text-white\/50 {
+  color: rgba(226, 232, 240, 0.80) !important;
+}
+html.dark .text-white\/60 {
+  color: rgba(241, 245, 249, 0.86) !important;
+}
+
+/* ============================================================================
+   COMPREHENSIVE LIGHT MODE HARMONIZATION (ZERO VISIBILITY ISSUES)
+   Automatically converts legacy dark-only classes (bg-black/*, bg-slate-900/*,
+   text-white/*, pastel 300-level text, border-white/*) into high-contrast
+   clinical light surfaces & WCAG AAA dark typography, while preserving
+   3D WebGL / Canvas dark stages ([data-dark-stage="true"]).
+   ============================================================================ */
+
+/* 1. Convert dark card & container backgrounds to crisp white / alabaster / slate-100 */
+html.light .bg-slate-950:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-slate-950\/95:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-slate-950\/90:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-slate-950\/80:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-slate-950\/70:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-slate-950\/60:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-slate-950\/50:not([data-dark-stage="true"]):not([data-dark-stage="true"] *) {
+  background-color: #f8fafc !important;
+  color: #0f172a;
+}
+
+html.light .bg-slate-900:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-slate-900\/95:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-slate-900\/90:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-slate-900\/80:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-slate-900\/70:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-slate-900\/60:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-slate-900\/50:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-slate-900\/40:not([data-dark-stage="true"]):not([data-dark-stage="true"] *) {
+  background-color: #ffffff !important;
+  color: #0f172a;
+}
+
+html.light .bg-slate-800:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-slate-800\/90:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-slate-800\/80:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-slate-800\/70:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-slate-800\/60:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-slate-800\/50:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-slate-800\/40:not([data-dark-stage="true"]):not([data-dark-stage="true"] *) {
+  background-color: #f1f5f9 !important;
+  color: #0f172a;
+}
+
+html.light .bg-black\/80:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-black\/70:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-black\/60:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-black\/50:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-black\/40:not([data-dark-stage="true"]):not([data-dark-stage="true"] *) {
+  background-color: #ffffff !important;
+  color: #0f172a;
+  box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.06), 0 1px 3px 0 rgba(15, 23, 42, 0.04) !important;
+}
+
+html.light .bg-black\/30:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-black\/20:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-black\/10:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-white\/5:not([data-dark-stage="true"]):not([data-dark-stage="true"] *),
+html.light .bg-white\/10:not([data-dark-stage="true"]):not([data-dark-stage="true"] *) {
+  background-color: #f1f5f9 !important;
+  color: #0f172a;
+}
+
+/* 2. Convert dark tinted badge backgrounds to crisp pastel badges in Light Mode */
+html.light .bg-purple-950\/60:not([data-dark-stage="true"] *),
+html.light .bg-purple-950\/80:not([data-dark-stage="true"] *),
+html.light .bg-purple-900\/40:not([data-dark-stage="true"] *),
+html.light .bg-purple-500\/15:not([data-dark-stage="true"] *),
+html.light .bg-purple-500\/20:not([data-dark-stage="true"] *),
+html.light .bg-purple-500\/30:not([data-dark-stage="true"] *) {
+  background-color: #f3e8ff !important;
+  border-color: #d8b4fe !important;
+  color: #581c87 !important;
+}
+
+html.light .bg-cyan-950\/60:not([data-dark-stage="true"] *),
+html.light .bg-cyan-950\/80:not([data-dark-stage="true"] *),
+html.light .bg-cyan-900\/60:not([data-dark-stage="true"] *),
+html.light .bg-cyan-500\/15:not([data-dark-stage="true"] *),
+html.light .bg-cyan-500\/20:not([data-dark-stage="true"] *) {
+  background-color: #e0f2fe !important;
+  border-color: #7dd3fc !important;
+  color: #0c4a6e !important;
+}
+
+html.light .bg-amber-950\/60:not([data-dark-stage="true"] *),
+html.light .bg-amber-950\/80:not([data-dark-stage="true"] *),
+html.light .bg-amber-900\/60:not([data-dark-stage="true"] *),
+html.light .bg-amber-500\/10:not([data-dark-stage="true"] *),
+html.light .bg-amber-500\/20:not([data-dark-stage="true"] *) {
+  background-color: #fef3c7 !important;
+  border-color: #fcd34d !important;
+  color: #78350f !important;
+}
+
+html.light .bg-emerald-950\/60:not([data-dark-stage="true"] *),
+html.light .bg-emerald-900\/60:not([data-dark-stage="true"] *),
+html.light .bg-emerald-500\/15:not([data-dark-stage="true"] *),
+html.light .bg-emerald-500\/20:not([data-dark-stage="true"] *) {
+  background-color: #d1fae5 !important;
+  border-color: #6ee7b7 !important;
+  color: #064e3b !important;
+}
+
+html.light .bg-rose-950\/60:not([data-dark-stage="true"] *),
+html.light .bg-rose-900\/60:not([data-dark-stage="true"] *),
+html.light .bg-rose-500\/15:not([data-dark-stage="true"] *),
+html.light .bg-rose-500\/20:not([data-dark-stage="true"] *) {
+  background-color: #ffe4e6 !important;
+  border-color: #fda4af !important;
+  color: #881337 !important;
+}
+
+/* 3. Convert white/light-slate text to deep obsidian/slate ink in Light Mode,
+      EXCEPT when inside solid accent buttons/pills or [data-dark-stage="true"] */
+html.light .text-white:not([data-dark-stage="true"] *):not(.bg-indigo-600):not(.bg-indigo-600 *):not(.bg-sky-600):not(.bg-sky-600 *):not(.bg-cyan-600):not(.bg-cyan-600 *):not(.bg-cyan-500):not(.bg-cyan-500 *):not(.bg-purple-600):not(.bg-purple-600 *):not(.bg-purple-600\/80):not(.bg-purple-600\/80 *):not(.bg-emerald-600):not(.bg-emerald-600 *):not(.bg-rose-600):not(.bg-rose-600 *):not(.bg-blue-600):not(.bg-blue-600 *):not(.bg-red-600):not(.bg-red-600 *):not(.from-purple-600):not(.from-purple-600 *):not(.from-cyan-600):not(.from-cyan-600 *):not(.from-cyan-600\/90):not(.from-cyan-600\/90 *):not(.from-emerald-600):not(.from-emerald-600 *):not(.from-indigo-600):not(.from-indigo-600 *):not(.from-rose-600):not(.from-rose-600 *),
+html.light .text-white\/90:not([data-dark-stage="true"] *):not(.from-cyan-600\/90 *),
+html.light .text-slate-100:not([data-dark-stage="true"] *),
+html.light .text-slate-200:not([data-dark-stage="true"] *) {
+  color: #0f172a !important;
+}
+
+html.light .text-white\/80:not([data-dark-stage="true"] *),
+html.light .text-white\/70:not([data-dark-stage="true"] *),
+html.light .text-slate-300:not([data-dark-stage="true"] *) {
+  color: #1e293b !important;
+}
+
+html.light .text-white\/60:not([data-dark-stage="true"] *),
+html.light .text-white\/50:not([data-dark-stage="true"] *),
+html.light .text-white\/40:not([data-dark-stage="true"] *),
+html.light .text-slate-400:not([data-dark-stage="true"] *) {
+  color: #475569 !important;
+}
+
+/* 4. Deepen neon/pastel 300/400 text colors in Light Mode for WCAG AAA contrast */
+html.light .text-cyan-300:not([data-dark-stage="true"] *),
+html.light .text-cyan-400:not([data-dark-stage="true"] *) {
+  color: #0369a1 !important;
+}
+
+html.light .text-purple-200:not([data-dark-stage="true"] *),
+html.light .text-purple-300:not([data-dark-stage="true"] *),
+html.light .text-purple-400:not([data-dark-stage="true"] *),
+html.light .text-purple-100:not([data-dark-stage="true"] *) {
+  color: #6d28d9 !important;
+}
+
+html.light .text-amber-200:not([data-dark-stage="true"] *),
+html.light .text-amber-300:not([data-dark-stage="true"] *),
+html.light .text-amber-400:not([data-dark-stage="true"] *) {
+  color: #b45309 !important;
+}
+
+html.light .text-emerald-100:not([data-dark-stage="true"] *),
+html.light .text-emerald-200:not([data-dark-stage="true"] *),
+html.light .text-emerald-300:not([data-dark-stage="true"] *),
+html.light .text-emerald-400:not([data-dark-stage="true"] *) {
+  color: #047857 !important;
+}
+
+html.light .text-rose-100:not([data-dark-stage="true"] *),
+html.light .text-rose-200:not([data-dark-stage="true"] *),
+html.light .text-rose-300:not([data-dark-stage="true"] *),
+html.light .text-rose-400:not([data-dark-stage="true"] *) {
+  color: #be123c !important;
+}
+
+html.light .text-indigo-300:not([data-dark-stage="true"] *) {
+  color: #4338ca !important;
+}
+
+/* 5. Harmonize borders in Light Mode */
+html.light .border-white\/5:not([data-dark-stage="true"] *),
+html.light .border-white\/10:not([data-dark-stage="true"] *),
+html.light .border-white\/15:not([data-dark-stage="true"] *),
+html.light .border-white\/20:not([data-dark-stage="true"] *),
+html.light .border-slate-800:not([data-dark-stage="true"] *),
+html.light .border-slate-800\/80:not([data-dark-stage="true"] *),
+html.light .border-slate-700:not([data-dark-stage="true"] *),
+html.light .border-slate-700\/80:not([data-dark-stage="true"] *),
+html.light .border-slate-700\/70:not([data-dark-stage="true"] *) {
+  border-color: #cbd5e1 !important;
+}

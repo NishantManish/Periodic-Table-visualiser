@@ -19,6 +19,7 @@ import {
   BarChart3
 } from 'lucide-react';
 import { AbundanceChart } from './AbundanceChart';
+import { useToast } from '../ui/Toast';
 
 export const ElementDetailModal: React.FC = () => {
   const {
@@ -30,6 +31,7 @@ export const ElementDetailModal: React.FC = () => {
     saveNote,
     gradeLevel,
   } = useAppStore();
+  const { toast } = useToast();
 
   const [activeTab, setActiveTab] = useState<'overview' | 'bohr' | 'applications' | 'ai-tutor' | 'notes'>('overview');
 
@@ -83,6 +85,11 @@ export const ElementDetailModal: React.FC = () => {
 
   const handleSaveNote = () => {
     saveNote(selectedElement.atomicNumber, noteText);
+    toast(
+      `Study Note Saved (${selectedElement.symbol})`,
+      `Your personal chemistry notes for ${selectedElement.name} have been persisted.`,
+      'success'
+    );
   };
 
   return (
@@ -430,33 +437,57 @@ export const ElementDetailModal: React.FC = () => {
                   {/* Lewis Dot Structure */}
                   <div className="p-6 rounded-2xl bg-black/40 border border-white/10 shadow-sm backdrop-blur-md flex flex-col items-center justify-center space-y-4">
                     <h4 className="text-xs font-bold text-purple-400 uppercase">Lewis Dot Structure</h4>
-                    
-                    <div className="relative w-28 h-28 flex items-center justify-center bg-black/20 rounded-2xl border border-white/10 shadow-inner">
-                      <span className="text-3xl font-extrabold text-white">{selectedElement.symbol}</span>
+                    {(() => {
+                      const isMainGroup =
+                        selectedElement.block === 's' || selectedElement.block === 'p';
+                      const outerDots =
+                        selectedElement.outerValenceElectrons ??
+                        (isMainGroup
+                          ? Math.min(selectedElement.valenceElectrons, 8)
+                          : selectedElement.bohrShells[selectedElement.bohrShells.length - 1] || 2);
+                      const positions = [
+                        'top-2 left-1/2 -translate-x-2',
+                        'right-2 top-1/2 -translate-y-2',
+                        'bottom-2 left-1/2 -translate-x-2',
+                        'left-2 top-1/2 -translate-y-2',
+                        'top-2 left-1/2 translate-x-1',
+                        'right-2 top-1/2 translate-y-1',
+                        'bottom-2 left-1/2 translate-x-1',
+                        'left-2 top-1/2 translate-y-1',
+                      ];
+                      return (
+                        <>
+                          <div className="relative w-28 h-28 flex items-center justify-center bg-black/20 rounded-2xl border border-white/10 shadow-inner">
+                            <span className="text-3xl font-extrabold text-white">
+                              {selectedElement.symbol}
+                            </span>
 
-                      {Array.from({ length: Math.min(selectedElement.valenceElectrons, 8) }).map((_, i) => {
-                        const positions = [
-                          'top-2 left-1/2 -translate-x-1/2',
-                          'right-2 top-1/2 -translate-y-1/2',
-                          'bottom-2 left-1/2 -translate-x-1/2',
-                          'left-2 top-1/2 -translate-y-1/2',
-                          'top-2 left-1/3 -translate-x-1/2',
-                          'right-2 top-1/3 -translate-y-1/2',
-                          'bottom-2 left-1/3 -translate-x-1/2',
-                          'left-2 top-1/3 -translate-y-1/2',
-                        ];
-                        return (
-                          <div
-                            key={i}
-                            className={`absolute w-3 h-3 rounded-full bg-purple-400 shadow-sm shadow-purple-400/80 ${positions[i]}`}
-                          />
-                        );
-                      })}
-                    </div>
+                            {Array.from({ length: Math.min(outerDots, 8) }).map((_, i) => (
+                              <div
+                                key={i}
+                                className={`absolute w-3 h-3 rounded-full bg-purple-400 shadow-sm shadow-purple-400/80 ${positions[i]}`}
+                              />
+                            ))}
+                          </div>
 
-                    <p className="text-xs text-slate-400 text-center">
-                      Shows <strong className="text-purple-300">{selectedElement.valenceElectrons}</strong> valence electrons responsible for chemical reactivity and bonding.
-                    </p>
+                          <p className="text-xs text-slate-400 text-center">
+                            {isMainGroup ? (
+                              <>
+                                Shows <strong className="text-purple-300">{outerDots}</strong> outer s/p
+                                valence electrons responsible for main-group bonding.
+                              </>
+                            ) : (
+                              <>
+                                Shows <strong className="text-purple-300">{outerDots}</strong> outer ns
+                                electron(s) ({selectedElement.valenceElectrons} total{' '}
+                                {selectedElement.block}-block valence e⁻; participates in variable
+                                oxidation states [{selectedElement.oxidationStates.map((s) => (s > 0 ? `+${s}` : `${s}`)).join(', ')}]).
+                              </>
+                            )}
+                          </p>
+                        </>
+                      );
+                    })()}
                   </div>
 
                 </div>

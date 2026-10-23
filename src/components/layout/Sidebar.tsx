@@ -23,7 +23,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
   const navItems: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
     { id: 'table', label: 'Periodic Table', icon: <Table className="w-4 h-4" /> },
     { id: '3d-atom', label: '3D Atom & Orbital', icon: <Box className="w-4 h-4" /> },
-    { id: 'molecule-builder', label: 'Molecule Builder', icon: <Share2 className="w-4 h-4" /> },
+    { id: 'molecule-visualizer', label: 'Molecule Visualizer', icon: <Share2 className="w-4 h-4" /> },
     { id: 'reaction-simulator', label: 'Reaction Simulator', icon: <Flame className="w-4 h-4" /> },
     { id: 'trends', label: 'Periodic Trends', icon: <TrendingUp className="w-4 h-4" /> },
     { id: 'learning', label: 'Learning & Progress', icon: <BookOpen className="w-4 h-4" /> },

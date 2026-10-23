@@ -122,10 +122,10 @@ export const LearningDashboard: React.FC = () => {
                 Start Practice Quiz
               </button>
               <button
-                onClick={() => setViewMode('molecule-builder')}
-                className="px-4 py-2.5 rounded-xl bg-black/20 hover:bg-white/10 border border-white/10 text-slate-200 font-bold text-xs shadow-inner"
+                onClick={() => setViewMode('molecule-visualizer')}
+                className="px-4 py-2.5 rounded-xl bg-black/20 hover:bg-white/10 border border-white/10 text-slate-200 font-bold text-xs shadow-inner cursor-pointer"
               >
-                Open 3D Builder
+                Open Molecule Visualizer
               </button>
             </div>
           </div>

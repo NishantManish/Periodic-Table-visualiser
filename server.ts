@@ -106,9 +106,55 @@ function extractJson(text: string) {
 }
 
 /**
- * Fast call to NVIDIA NIM API using the active, ultra-fast model (meta/llama-3.2-11b-vision-instruct).
- * Supports configurable model via NVIDIA_NIM_MODEL env var.
+ * Fast call to OpenRouter API using recursive/flint-v1.0:free (or OPENROUTER_MODEL env var)
+ * when OPENROUTER_API_KEY is configured, or NVIDIA NIM API using meta/llama-3.2-11b-vision-instruct.
  */
+async function callOpenRouter({
+  messages,
+  temperature = 0.3,
+  max_tokens = 700,
+  timeoutMs = 15000,
+}: {
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+  temperature?: number;
+  max_tokens?: number;
+  timeoutMs?: number;
+}) {
+  const apiKey = (process.env.OPENROUTER_API_KEY || "").trim();
+  if (!apiKey) {
+    throw new Error("OpenRouter API key is not configured.");
+  }
+
+  const model = process.env.OPENROUTER_MODEL?.trim() || "recursive/flint-v1.0:free";
+  const start = Date.now();
+
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      temperature,
+      max_tokens,
+    }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+
+  const latencyMs = Date.now() - start;
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OpenRouter API HTTP ${response.status}: ${errorText}`);
+  }
+
+  const data = await response.json();
+  const rawContent = data.choices?.[0]?.message?.content || "";
+  return { content: rawContent.trim(), latencyMs, model, provider: "openrouter" as const };
+}
+
 async function callNvidiaNim({
   messages,
   temperature = 0.3,
@@ -120,6 +166,11 @@ async function callNvidiaNim({
   max_tokens?: number;
   timeoutMs?: number;
 }) {
+  // Prefer OpenRouter recursive/flint-v1.0:free if OPENROUTER_API_KEY is present
+  if ((process.env.OPENROUTER_API_KEY || "").trim().length > 0) {
+    return callOpenRouter({ messages, temperature, max_tokens, timeoutMs });
+  }
+
   const apiKey = (process.env.NVIDIA_API_KEY || process.env.NIM_API_KEY || "").trim();
   if (!apiKey) {
     throw new Error("NVIDIA NIM API key is not configured.");
@@ -153,10 +204,10 @@ async function callNvidiaNim({
 
   const data = await response.json();
   const rawContent = data.choices?.[0]?.message?.content || "";
-  return { content: rawContent.trim(), latencyMs, model };
+  return { content: rawContent.trim(), latencyMs, model, provider: "nvidia-nim" as const };
 }
 
-// Resilient Gemini fallback if NIM encounters a transient issue or is unconfigured
+// Resilient Gemini fallback if NIM/OpenRouter encounters a transient issue or is unconfigured
 async function callGeminiFallback({
   systemPrompt,
   userPrompt,
@@ -168,8 +219,9 @@ async function callGeminiFallback({
 }) {
   const ai = getAiClient();
   const start = Date.now();
+  const modelName = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
   const response = await ai.models.generateContent({
-    model: "gemini-3.6-flash",
+    model: modelName,
     contents: userPrompt,
     config: {
       systemInstruction: systemPrompt,
@@ -179,13 +231,13 @@ async function callGeminiFallback({
   return {
     content: (response.text || "").trim(),
     latencyMs: Date.now() - start,
-    model: "gemini-3.6-flash",
+    model: modelName,
   };
 }
 
-// Check if NVIDIA NIM is configured
+// Check if OpenRouter or NVIDIA NIM is configured
 function hasNvidiaNim(): boolean {
-  const key = process.env.NVIDIA_API_KEY || process.env.NIM_API_KEY;
+  const key = process.env.OPENROUTER_API_KEY || process.env.NVIDIA_API_KEY || process.env.NIM_API_KEY;
   return Boolean(key && key.trim().length > 0);
 }
 
@@ -483,6 +535,175 @@ Important: "correctIndex" must be integer (0, 1, 2, or 3).`;
   } catch (error: any) {
     console.error("Quiz generation error:", error);
     res.status(500).json({ error: error?.message || "Failed to generate quiz." });
+  }
+});
+
+// API: Analyze Custom Molecule & Structural Isomers with 3D Coordinates
+app.post("/api/ai/analyze-molecule", async (req, res) => {
+  try {
+    const { query } = req.body;
+    const cleanQuery = String(query || "").trim();
+    if (!cleanQuery) {
+      return res.status(400).json({ error: "Molecule query is required." });
+    }
+
+    const cacheKey = `molecule-v3:${cleanQuery.toLowerCase()}`;
+    const cached = getCached(cacheKey);
+    if (cached) {
+      return res.json({ ...cached, cached: true, latencyMs: 2 });
+    }
+
+    const prompt = `You are a computational chemistry and crystallography engine.
+Analyze the chemical molecule or formula: "${cleanQuery}".
+If this formula has multiple structural or geometric isomers (same atoms, different connectivity/structure), also return 1 alternative structural isomer in "relatedIsomers" using the exact same MoleculeDossier schema.
+
+Output strictly valid JSON matching this exact MoleculeDossier schema (no markdown blocks):
+{
+  "molecule": {
+    "id": "ai-${Date.now()}",
+    "name": "Common Name",
+    "iupacName": "Official IUPAC Name",
+    "commonNames": ["Synonym 1"],
+    "casNumber": "CAS Number",
+    "smiles": "SMILES string",
+    "formula": "Unicode subscript Hill formula e.g. C₃H₈O",
+    "condensedFormula": "Condensed formula e.g. CH₃CH₂CH₂OH",
+    "isomerGroup": "ASCII formula without subscripts e.g. C3H8O",
+    "isomerType": "Constitutional (Functional Group)",
+    "isomerComparisonNote": "Why this isomer differs in structure, dipole moment, and boiling point from its isomers.",
+    "category": "Organic",
+    "molecularWeight": 60.096,
+    "degreeOfUnsaturation": 0,
+    "pointGroup": "Cs",
+    "bondType": "Polar Covalent",
+    "geometry": "Tetrahedral at C, Bent at O",
+    "electronicGeometry": "Tetrahedral",
+    "vseprNotation": "AX₄ / AX₂E₂",
+    "stericNumber": 4,
+    "bondAngle": "109.5° (C–C–C), 104.5° (C–O–H)",
+    "hybridization": "sp³",
+    "polarity": "Polar",
+    "dipoleMomentDebye": 1.68,
+    "description": "Detailed scientific description of the molecule.",
+    "formationCriteria": {
+      "octetRuleStatus": "All C and O atoms satisfy the 8-electron octet rule; H atoms satisfy the 2-electron duet rule.",
+      "deltaEN": "ΔEN(O–H) = 1.24, ΔEN(C–O) = 0.89",
+      "sigmaBonds": 11,
+      "piBonds": 0,
+      "lonePairsTotal": 2,
+      "resonanceDescription": "Localized σ-framework with two non-bonding lone pairs on oxygen."
+    },
+    "thermodynamics": {
+      "deltaHf": "−302.6 kJ/mol (liquid)",
+      "deltaGf": "−170.8 kJ/mol",
+      "entropyS": "192.8 J/(mol·K)",
+      "bondEnergies": [
+        {"bond": "C–C", "lengthAngstrom": 1.53, "energyKjMol": 348},
+        {"bond": "C–O", "lengthAngstrom": 1.43, "energyKjMol": 358},
+        {"bond": "O–H", "lengthAngstrom": 0.96, "energyKjMol": 463}
+      ]
+    },
+    "synthesisMethods": {
+      "industrial": {
+        "processName": "Hydroformylation of Ethene followed by Hydrogenation",
+        "equation": "C₂H₄ + CO + H₂ → CH₃CH₂CHO ; + H₂ → CH₃CH₂CH₂OH",
+        "conditions": "100–150 °C, 20–40 bar",
+        "catalyst": "Rhodium / triphenylphosphine catalyst",
+        "mechanismSummary": "Oxo process hydroformylation yields propanal, which is catalytically hydrogenated to propan-1-ol."
+      },
+      "laboratory": {
+        "methodName": "NaBH₄ Reduction of Propanal",
+        "equation": "CH₃CH₂CHO + NaBH₄ + H₂O → CH₃CH₂CH₂OH",
+        "reagents": "Propanal + Sodium borohydride in ethanol",
+        "conditions": "25 °C",
+        "procedureNotes": "Nucleophilic hydride transfer followed by aqueous workup."
+      }
+    },
+    "physicalProperties": {
+      "stateAtSTP": "Liquid",
+      "appearance": "Clear colorless liquid",
+      "meltingPointC": "−126.1 °C",
+      "boilingPointC": "97.2 °C",
+      "density": "0.803 g/cm³",
+      "solubility": "Miscible with water and organic solvents",
+      "pKa": "16.1",
+      "intermolecularForces": ["Intermolecular O–H···O Hydrogen Bonding", "London Dispersion"]
+    },
+    "spectroscopy": {
+      "irBands": [
+        {"wavenumberCm": "3340 cm⁻¹ (broad, strong)", "assignment": "Hydrogen-bonded O–H stretch"},
+        {"wavenumberCm": "1055 cm⁻¹ (strong)", "assignment": "Primary alcohol C–O stretch"}
+      ],
+      "nmrShifts": [
+        {"nucleus": "¹H NMR", "shiftPpm": "δ 3.58 ppm (triplet, 2H)", "assignment": "–CH₂OH protons"}
+      ]
+    },
+    "applications": {
+      "industrial": ["Solvent for flexographic printing inks and coatings", "Precursor to propyl acetate"],
+      "laboratory": ["Chromatography solvent and recrystallization medium"],
+      "biologicalAndMedical": ["Topical antiseptic component"]
+    },
+    "safety": {
+      "ghsHazards": ["H225: Highly flammable liquid and vapor", "H318: Causes serious eye damage"],
+      "nfpa704": {"health": 1, "flammability": 3, "instability": 0},
+      "handling": "Keep away from ignition sources; wear eye protection."
+    },
+    "atoms": [
+      {"symbol": "C", "x": -1.25, "y": -0.25, "z": 0.0, "partialCharge": -0.12, "formalCharge": 0, "hybridization": "sp³", "lonePairs": 0},
+      {"symbol": "C", "x": 0.0, "y": 0.55, "z": 0.0, "partialCharge": 0.14, "formalCharge": 0, "hybridization": "sp³", "lonePairs": 0},
+      {"symbol": "O", "x": 1.18, "y": -0.22, "z": 0.0, "partialCharge": -0.64, "formalCharge": 0, "hybridization": "sp³", "lonePairs": 2},
+      {"symbol": "H", "x": 1.95, "y": 0.36, "z": 0.0, "partialCharge": 0.40, "formalCharge": 0, "hybridization": "1s", "lonePairs": 0}
+    ],
+    "bonds": [
+      {"source": 0, "target": 1, "order": 1, "lengthAngstrom": 1.53},
+      {"source": 1, "target": 2, "order": 1, "lengthAngstrom": 1.43},
+      {"source": 2, "target": 3, "order": 1, "lengthAngstrom": 0.96}
+    ]
+  },
+  "relatedIsomers": []
+}`;
+
+    const systemPrompt = "You are an expert structural chemist and crystallographic 3D coordinate generator. Output strictly valid JSON only.";
+    let resultPayload;
+
+    if (hasNvidiaNim()) {
+      try {
+        const { content, latencyMs, model } = await callNvidiaNim({
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: prompt },
+          ],
+          temperature: 0.2,
+          max_tokens: 1800,
+          timeoutMs: 15000,
+        });
+        const parsed = extractJson(content);
+        resultPayload = { result: parsed, provider: "nvidia-nim", model, latencyMs };
+      } catch (nimErr) {
+        console.warn("NVIDIA NIM molecule analysis failed, falling back to Gemini:", nimErr);
+        const { content, latencyMs, model } = await callGeminiFallback({
+          systemPrompt,
+          userPrompt: prompt,
+          maxTokens: 1800,
+        });
+        const parsed = extractJson(content);
+        resultPayload = { result: parsed, provider: "gemini", model, latencyMs };
+      }
+    } else {
+      const { content, latencyMs, model } = await callGeminiFallback({
+        systemPrompt,
+        userPrompt: prompt,
+        maxTokens: 1800,
+      });
+      const parsed = extractJson(content);
+      resultPayload = { result: parsed, provider: "gemini", model, latencyMs };
+    }
+
+    setCached(cacheKey, resultPayload);
+    return res.json(resultPayload);
+  } catch (error: any) {
+    console.error("Molecule analysis error:", error);
+    res.status(500).json({ error: error?.message || "Failed to analyze molecule." });
   }
 });
 

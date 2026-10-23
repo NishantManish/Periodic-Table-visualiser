@@ -55,6 +55,13 @@ interface SparkParticle {
   size: number;
 }
 
+interface TransitionFlash {
+  x: number;
+  y: number;
+  radius: number;
+  alpha: number;
+}
+
 interface BubbleParticle {
   x: number;
   y: number;
@@ -144,12 +151,76 @@ export const ReactionSimulator: React.FC = () => {
     });
   }, [filterType, searchQuery]);
 
+  const flashesRef = useRef<TransitionFlash[]>([]);
+  const prevTempKRef = useRef<number>(selectedReaction.requiredConditions.temp + 273.15);
+
+  // Sample 2D Maxwell-Boltzmann speed at temperature T (Rayleigh distribution: v = σ_T * sqrt(-2 ln u))
+  const sampleMaxwellBoltzmannVelocity = useCallback((tempCelsius: number): { vx: number; vy: number } => {
+    const tK = Math.max(50, tempCelsius + 273.15);
+    const sigma = Math.sqrt(tK / 298.15) * 1.35;
+    const u1 = Math.max(0.001, Math.min(0.999, Math.random()));
+    const speed = sigma * Math.sqrt(-2 * Math.log(u1));
+    const angle = Math.random() * Math.PI * 2;
+    return {
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+    };
+  }, []);
+
+  const initChamberParticles = useCallback(
+    (rxn: Reaction, tempCelsius: number, pressAtm: number) => {
+      const width = 680;
+      const height = 288;
+      const pistonY = 20 + Math.min(65, (pressAtm / 500) * 65);
+      const numParticles = 32;
+      const newParticles: ReactionParticle[] = [];
+
+      const reactantColor1 = '#38bdf8';
+      const reactantColor2 = '#fbbf24';
+      const reactant1 = rxn.reactants[0] || 'A';
+      const reactant2 = rxn.reactants[1] || rxn.reactants[0] || 'B';
+
+      for (let i = 0; i < numParticles; i++) {
+        const isReactant1 = i % 2 === 0;
+        const symbol = isReactant1 ? reactant1 : reactant2;
+        const { vx, vy } = sampleMaxwellBoltzmannVelocity(tempCelsius);
+
+        newParticles.push({
+          id: i,
+          x: Math.random() * (width - 60) + 30,
+          y: Math.random() * (height - pistonY - 55) + pistonY + 22,
+          vx,
+          vy,
+          radius: 11,
+          type: isReactant1 ? 'reactant1' : 'reactant2',
+          symbol,
+          color: isReactant1 ? reactantColor1 : reactantColor2,
+          adsorbed: false,
+        });
+      }
+
+      particlesRef.current = newParticles;
+      sparksRef.current = [];
+      flashesRef.current = [];
+      bubblesRef.current = [];
+      prevTempKRef.current = tempCelsius + 273.15;
+    },
+    [sampleMaxwellBoltzmannVelocity]
+  );
+
   // Run Chamber Simulation with Timer
   const startSimulation = () => {
     if (isSimulating) {
       if (simulationTimerRef.current) clearInterval(simulationTimerRef.current);
       setIsSimulating(false);
       return;
+    }
+
+    if (
+      simulationProgress >= 100 ||
+      particlesRef.current.every((p) => p.type === 'product')
+    ) {
+      initChamberParticles(selectedReaction, temperature, pressure);
     }
 
     setIsSimulating(true);
@@ -183,12 +254,31 @@ export const ReactionSimulator: React.FC = () => {
     simulationTimerRef.current = timer;
   };
 
+  // Initialize particles only when selectedReaction changes
+  useEffect(() => {
+    initChamberParticles(selectedReaction, selectedReaction.requiredConditions.temp, selectedReaction.requiredConditions.pressure);
+  }, [selectedReaction, initChamberParticles]);
+
+  // Smoothly rescale particle thermal speeds when user drags the Temperature slider
+  useEffect(() => {
+    const newTK = Math.max(50, temperature + 273.15);
+    const ratio = Math.sqrt(newTK / Math.max(50, prevTempKRef.current));
+    if (Math.abs(ratio - 1) > 0.01) {
+      particlesRef.current.forEach((p) => {
+        p.vx *= ratio;
+        p.vy *= ratio;
+      });
+      prevTempKRef.current = newTK;
+    }
+  }, [temperature]);
+
   const resetSimulation = () => {
     if (simulationTimerRef.current) clearInterval(simulationTimerRef.current);
     setIsSimulating(false);
     setSimulationProgress(0);
     setActiveStepIndex(0);
     setScrubCoordinate(0);
+    initChamberParticles(selectedReaction, temperature, pressure);
   };
 
   useEffect(() => {
@@ -198,7 +288,7 @@ export const ReactionSimulator: React.FC = () => {
     };
   }, []);
 
-  // Initialize and Update Particle Chamber Canvas
+  // Continuous 60fps Collision & Maxwell-Boltzmann Chamber Physics Loop
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -207,44 +297,18 @@ export const ReactionSimulator: React.FC = () => {
 
     const width = canvas.width;
     const height = canvas.height;
-
-    const pistonY = 20 + Math.min(65, (pressure / 500) * 65);
-    const numParticles = 32;
-    const newParticles: ReactionParticle[] = [];
-
-    const reactantColor1 = '#38bdf8';
-    const reactantColor2 = '#fbbf24';
     const productColor = '#34d399';
-
-    const reactant1 = selectedReaction.reactants[0] || 'A';
-    const reactant2 = selectedReaction.reactants[1] || selectedReaction.reactants[0] || 'B';
     const product = selectedReaction.products[0] || 'C';
-
-    for (let i = 0; i < numParticles; i++) {
-      const isReactant1 = i % 2 === 0;
-      const symbol = isReactant1 ? reactant1 : reactant2;
-      const tempK = temperature + 273.15;
-      const baseSpeed = Math.sqrt(tempK / 298) * 1.6;
-
-      newParticles.push({
-        id: i,
-        x: Math.random() * (width - 60) + 30,
-        y: Math.random() * (height - pistonY - 50) + pistonY + 20,
-        vx: (Math.random() - 0.5) * baseSpeed * 2,
-        vy: (Math.random() - 0.5) * baseSpeed * 2,
-        radius: 11,
-        type: isReactant1 ? 'reactant1' : 'reactant2',
-        symbol,
-        color: isReactant1 ? reactantColor1 : reactantColor2,
-      });
-    }
-
-    particlesRef.current = newParticles;
-    sparksRef.current = [];
-    bubblesRef.current = [];
+    const rawEa = selectedReaction.activationEnergy || 120;
+    const catEa = hasCatalyst ? Math.max(15, rawEa * 0.55) : rawEa;
+    // Scaled activation energy threshold in chamber velocity units: E_a,scaled
+    const eaThreshold = Math.max(0.35, (catEa / 110) * 1.15);
+    const rxnDeltaH = selectedReaction.deltaH ?? -92;
+    const exothermBoost = rxnDeltaH < 0 ? Math.min(1.45, 1 + Math.abs(rxnDeltaH) / 450) : 0.94;
 
     const render = () => {
       ctx.clearRect(0, 0, width, height);
+      const pistonY = 20 + Math.min(65, (pressure / 500) * 65);
 
       // 1. Draw Piston Cylinder Chamber Background
       ctx.fillStyle = '#090d16';
@@ -292,33 +356,34 @@ export const ReactionSimulator: React.FC = () => {
         ctx.fillText(`CATALYTIC BED [${catalyst}]`, width / 2, bedY + 16);
       }
 
-      // 4. Update and Draw Particles
+      // 4. Update Particle Positions & Wall / Catalyst Reflections
       const conversionRatio = simulationProgress / 100;
       const particles = particlesRef.current;
+      const numParticles = particles.length;
 
-      particles.forEach((p, idx) => {
+      particles.forEach((p) => {
         p.x += p.vx;
         p.y += p.vy;
 
         if (p.x - p.radius < 20) {
           p.x = 20 + p.radius;
-          p.vx *= -1;
+          p.vx = Math.abs(p.vx);
         }
         if (p.x + p.radius > width - 20) {
           p.x = width - 20 - p.radius;
-          p.vx *= -1;
+          p.vx = -Math.abs(p.vx);
         }
 
         const floorLimit = hasCatalyst ? bedY - p.radius : height - 15 - p.radius;
         if (p.y - p.radius < pistonY) {
           p.y = pistonY + p.radius;
-          p.vy *= -1;
+          p.vy = Math.abs(p.vy);
         }
         if (p.y > floorLimit) {
           p.y = floorLimit;
-          p.vy *= -1;
+          p.vy = -Math.abs(p.vy);
 
-          if (hasCatalyst && Math.random() < 0.4 && p.type !== 'product') {
+          if (hasCatalyst && Math.random() < 0.45 && p.type !== 'product') {
             p.adsorbed = true;
             sparksRef.current.push({
               x: p.x,
@@ -331,30 +396,119 @@ export const ReactionSimulator: React.FC = () => {
             });
           }
         }
+      });
 
-        if (idx < numParticles * conversionRatio) {
-          if (p.type !== 'product') {
-            for (let s = 0; s < 5; s++) {
-              sparksRef.current.push({
-                x: p.x,
-                y: p.y,
-                vx: (Math.random() - 0.5) * 4,
-                vy: (Math.random() - 0.5) * 4,
-                alpha: 1,
-                color: '#34d399',
-                size: 2.5,
+      // 5. Line-of-Centers Collision Kinetics: E_coll = 1/2 * μ_red * (v_rel · r_hat_ij)² >= E_a,scaled
+      const targetProducts = Math.floor(numParticles * conversionRatio);
+      let currentProducts = particles.reduce((acc, pt) => acc + (pt.type === 'product' ? 1 : 0), 0);
+
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const p1 = particles[i];
+          const p2 = particles[j];
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+          const dist = Math.hypot(dx, dy);
+          const minDist = p1.radius + p2.radius;
+
+          if (dist > 0 && dist < minDist) {
+            const nx = dx / dist;
+            const ny = dy / dist;
+            const overlap = (minDist - dist) * 0.5;
+            p1.x -= nx * overlap;
+            p1.y -= ny * overlap;
+            p2.x += nx * overlap;
+            p2.y += ny * overlap;
+
+            const rvx = p1.vx - p2.vx;
+            const rvy = p1.vy - p2.vy;
+            const vRelNormal = rvx * nx + rvy * ny;
+
+            // Reduced mass μ_red = (m1*m2)/(m1+m2) = 0.5 for equal-mass particles
+            // Line-of-centers collision kinetic energy E_coll = 0.5 * μ_red * (v_rel · n_hat)²
+            const eColl = 0.5 * 0.5 * vRelNormal * vRelNormal;
+
+            if (vRelNormal > 0) {
+              p1.vx -= vRelNormal * nx;
+              p1.vy -= vRelNormal * ny;
+              p2.vx += vRelNormal * nx;
+              p2.vy += vRelNormal * ny;
+            }
+
+            const isReactivePair =
+              (p1.type === 'reactant1' && p2.type === 'reactant2') ||
+              (p1.type === 'reactant2' && p2.type === 'reactant1') ||
+              (selectedReaction.reactants.length === 1 && p1.type !== 'product' && p2.type !== 'product');
+
+            // Local threshold lowered further if either reactant is surface-adsorbed on catalyst
+            const localThreshold = p1.adsorbed || p2.adsorbed ? eaThreshold * 0.45 : eaThreshold;
+
+            if (
+              isSimulating &&
+              currentProducts < targetProducts &&
+              isReactivePair &&
+              (eColl >= localThreshold || conversionRatio > 0.25)
+            ) {
+              const reactTarget = p1.type !== 'product' ? p1 : p2;
+              reactTarget.type = 'product';
+              reactTarget.color = productColor;
+              reactTarget.symbol = product;
+              currentProducts++;
+
+              // Exothermic enthalpy release (-ΔH) accelerates outgoing product velocities
+              p1.vx *= exothermBoost;
+              p1.vy *= exothermBoost;
+              p2.vx *= exothermBoost;
+              p2.vy *= exothermBoost;
+
+              const cx = (p1.x + p2.x) * 0.5;
+              const cy = (p1.y + p2.y) * 0.5;
+
+              // Spawn Transition-State Activated Complex Flash Ring [‡]
+              flashesRef.current.push({
+                x: cx,
+                y: cy,
+                radius: 8,
+                alpha: 1.0,
               });
+
+              for (let s = 0; s < 6; s++) {
+                sparksRef.current.push({
+                  x: cx,
+                  y: cy,
+                  vx: (Math.random() - 0.5) * 4.5,
+                  vy: (Math.random() - 0.5) * 4.5,
+                  alpha: 1,
+                  color: '#34d399',
+                  size: 2.6,
+                });
+              }
             }
           }
-          p.type = 'product';
-          p.color = productColor;
-          p.symbol = product;
-        } else if (p.type === 'product' && conversionRatio === 0) {
-          p.type = idx % 2 === 0 ? 'reactant1' : 'reactant2';
-          p.color = idx % 2 === 0 ? reactantColor1 : reactantColor2;
-          p.symbol = idx % 2 === 0 ? reactant1 : reactant2;
         }
+      }
 
+      // Convert catalyst-adsorbed reactants if simulation nears completion
+      if (isSimulating && currentProducts < targetProducts && conversionRatio >= 0.92) {
+        for (let i = 0; i < particles.length && currentProducts < targetProducts; i++) {
+          const pt = particles[i];
+          if (pt.type !== 'product') {
+            pt.type = 'product';
+            pt.color = productColor;
+            pt.symbol = product;
+            currentProducts++;
+            flashesRef.current.push({
+              x: pt.x,
+              y: pt.y,
+              radius: 8,
+              alpha: 0.9,
+            });
+          }
+        }
+      }
+
+      // Draw Particles
+      particles.forEach((p) => {
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
         ctx.fillStyle = p.color;
@@ -379,7 +533,31 @@ export const ReactionSimulator: React.FC = () => {
         ctx.fillText(p.symbol, p.x, p.y);
       });
 
-      // 5. Update and Draw Sparks
+      // Draw Expanding Transition-State Activated Complex Rings [‡]
+      for (let f = flashesRef.current.length - 1; f >= 0; f--) {
+        const fl = flashesRef.current[f];
+        fl.radius += 0.9;
+        fl.alpha -= 0.035;
+        if (fl.alpha <= 0) {
+          flashesRef.current.splice(f, 1);
+        } else {
+          ctx.save();
+          ctx.globalAlpha = Math.max(0, fl.alpha);
+          ctx.beginPath();
+          ctx.arc(fl.x, fl.y, fl.radius, 0, Math.PI * 2);
+          ctx.strokeStyle = '#f43f5e';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
+          ctx.fillStyle = '#fda4af';
+          ctx.font = 'bold 9px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText('[‡]', fl.x, fl.y - fl.radius - 3);
+          ctx.restore();
+        }
+      }
+
+      // Update and Draw Sparks
       for (let s = sparksRef.current.length - 1; s >= 0; s--) {
         const spark = sparksRef.current[s];
         spark.x += spark.vx;
@@ -398,12 +576,13 @@ export const ReactionSimulator: React.FC = () => {
         }
       }
 
-      // 6. Draw Effervescence Bubbles for Gas Reactions
+      // Draw Effervescence Bubbles for Gas Evolution
       if (
         isSimulating &&
         (selectedReaction.reactionType === 'Combustion' ||
           selectedReaction.balancedEquation.includes('↑') ||
-          selectedReaction.balancedEquation.includes('H₂'))
+          selectedReaction.balancedEquation.includes('H₂') ||
+          selectedReaction.balancedEquation.includes('CO₂'))
       ) {
         if (Math.random() < 0.35) {
           bubblesRef.current.push({
@@ -566,28 +745,79 @@ export const ReactionSimulator: React.FC = () => {
   // Equilibrium Constant log10(K_eq) = -ΔG / (2.303 * R * T)
   const log10Keq = (-deltaGVal * 1000) / (2.303 * R * tempK);
 
-  // Estimate Equilibrium Yield (%) considering ΔG and Pressure Le Chatelier shift
+  // Compute gas stoichiometry Δn_gas = Σ ν_prod(g) - Σ ν_react(g) for Le Chatelier pressure shift
+  const deltaNGas = useMemo(() => {
+    const eq = selectedReaction.balancedEquation;
+    const parts = eq.split(/⇌|→|->|=/);
+    if (parts.length < 2) return 0;
+
+    const KNOWN_GASES = new Set([
+      'H₂', 'O₂', 'N₂', 'F₂', 'Cl₂', 'NH₃', 'CO', 'CO₂', 'SO₂', 'SO₃',
+      'NO', 'NO₂', 'N₂O', 'N₂O₄', 'CH₄', 'C₂H₄', 'C₂H₂', 'C₃H₈', 'C₄H₁₀',
+      'HCl', 'HI', 'HBr', 'H₂S', 'O₃',
+    ]);
+
+    const isGasPhaseRxn = selectedReaction.phaseState?.toLowerCase().includes('gas');
+
+    const sumGasStoich = (side: string): number => {
+      return side
+        .split('+')
+        .map((term) => term.trim())
+        .reduce((sum, term) => {
+          if (!term) return sum;
+          if (term.includes('(s)') || term.includes('(l)') || term.includes('(aq)') || term.includes('↓')) {
+            return sum;
+          }
+          const m = term.match(/^(\d+)\s*(.*)$/);
+          const coeff = m ? parseInt(m[1], 10) : 1;
+          const speciesRaw = (m ? m[2] : term).replace(/\(g\)|↑/g, '').trim();
+
+          const isExplicitGas = term.includes('(g)') || term.includes('↑');
+          const isWaterVapor =
+            speciesRaw === 'H₂O' && (isGasPhaseRxn || temperature >= 100 || selectedReaction.reactionType === 'Combustion');
+          const isIodineVapor = speciesRaw === 'I₂' && (isGasPhaseRxn || temperature >= 184);
+
+          if (isExplicitGas || KNOWN_GASES.has(speciesRaw) || isWaterVapor || isIodineVapor) {
+            return sum + coeff;
+          }
+          return sum;
+        }, 0);
+    };
+
+    return sumGasStoich(parts[1]) - sumGasStoich(parts[0]);
+  }, [selectedReaction, temperature]);
+
+  // Estimate Equilibrium Yield (%) considering ΔG and stoichiometric Δn_gas Pressure Le Chatelier shift
   const isReversible =
     selectedReaction.equilibriumType === 'Reversible' || selectedReaction.balancedEquation.includes('⇌');
   const equilibriumYield = useMemo(() => {
     if (!isReversible && deltaGVal < -20) return 99.9;
-    // Logistic mapping from log10(Keq) plus pressure contribution
-    const pFactor = pressure > 10 ? Math.log10(pressure) * 0.45 : 0;
+    // Le Chatelier pressure term: -Δn_gas * log10(P / 1 atm)
+    // When Δn_gas < 0 (e.g., Haber N₂ + 3H₂ ⇌ 2NH₃, Δn_gas = -2), high P increases yield.
+    // When Δn_gas > 0 (e.g., N₂O₄ ⇌ 2NO₂, Δn_gas = +1), high P decreases yield!
+    // When Δn_gas = 0 (e.g., H₂ + I₂ ⇌ 2HI), pressure has zero effect on equilibrium yield.
+    const pFactor = -deltaNGas * Math.log10(Math.max(1, pressure)) * 0.28;
     const effectiveLogK = Math.max(-6, Math.min(6, log10Keq * 0.25 + pFactor));
     const K = Math.pow(10, effectiveLogK);
     const yieldPct = (K / (1 + K)) * 100;
     return Number(Math.max(1.0, Math.min(99.9, yieldPct)).toFixed(1));
-  }, [isReversible, deltaGVal, log10Keq, pressure]);
+  }, [isReversible, deltaGVal, log10Keq, pressure, deltaNGas]);
 
   const leChatelierNote = useMemo(() => {
     if (!isReversible) {
       return `Irreversible reaction (ΔG = ${deltaG} kJ/mol): Proceeds virtually to completion (~${equilibriumYield}% yield). Increasing T (${temperature}°C) or P (${pressure} atm) accelerates collision kinetics.`;
     }
+    const pEffectText =
+      deltaNGas < 0
+        ? `Δn_gas = ${deltaNGas} (< 0): high P (${pressure} atm) shifts equilibrium toward products`
+        : deltaNGas > 0
+        ? `Δn_gas = +${deltaNGas} (> 0): high P (${pressure} atm) shifts equilibrium backward toward reactants`
+        : `Δn_gas = 0: pressure (${pressure} atm) accelerates rate without shifting K_p equilibrium`;
     if (isExothermic) {
-      return `Reversible exothermic equilibrium (ΔH < 0): High T (${temperature}°C) accelerates rate but shifts K_eq toward reactants; high P (${pressure} atm) compresses gas volume to boost conversion yield (~${equilibriumYield}%).`;
+      return `Reversible exothermic equilibrium (ΔH < 0): High T (${temperature}°C) shifts K_eq toward reactants; ${pEffectText} (~${equilibriumYield}% yield).`;
     }
-    return `Reversible endothermic equilibrium (ΔH > 0): Raising T (${temperature}°C) shifts K_eq toward products (~${equilibriumYield}% yield).`;
-  }, [isReversible, isExothermic, deltaG, equilibriumYield, temperature, pressure]);
+    return `Reversible endothermic equilibrium (ΔH > 0): Raising T (${temperature}°C) shifts K_eq toward products; ${pEffectText} (~${equilibriumYield}% yield).`;
+  }, [isReversible, isExothermic, deltaG, equilibriumYield, temperature, pressure, deltaNGas]);
 
   return (
     <div className="space-y-5 w-full">
@@ -884,7 +1114,10 @@ export const ReactionSimulator: React.FC = () => {
               </span>
             </div>
 
-            <div className="relative w-full h-72 rounded-2xl bg-black/40 border border-white/10 overflow-hidden shadow-inner">
+            <div
+              data-dark-stage="true"
+              className="relative w-full h-72 rounded-2xl bg-black/40 border border-white/10 overflow-hidden shadow-inner"
+            >
               <canvas ref={canvasRef} width={680} height={288} className="w-full h-full block" />
 
               {isSimulating && (

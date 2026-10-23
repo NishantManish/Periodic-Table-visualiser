@@ -1,5 +1,4 @@
 import React, { useMemo, useState, useCallback } from 'react';
-import { motion } from 'motion/react';
 import { ELEMENTS, CATEGORY_LABELS, CATEGORY_COLORS } from '../../data/elementsData';
 import { ElementTile } from './ElementTile';
 import { useAppStore } from '../../store/useAppStore';
@@ -127,11 +126,11 @@ export const PeriodicGrid: React.FC = () => {
       {/* Top Grid Control Bar & Desktop Live Telemetry Split */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-stretch">
         {/* Filter Controls Card (8 cols on XL PC) */}
-        <div className="xl:col-span-8 glass-panel p-4 rounded-2xl shadow-xl flex flex-col justify-between space-y-3 border border-white/10">
+        <div className="xl:col-span-8 bg-white dark:bg-slate-900/90 p-4 rounded-2xl shadow-xs border border-slate-200/90 dark:border-slate-800 flex flex-col justify-between space-y-3">
           {/* Main Category Filter Pills */}
-          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none pb-2.5 border-b border-white/10">
-            <span className="text-[11px] font-black text-slate-400 flex items-center gap-1 mr-1.5 shrink-0 tracking-wider uppercase">
-              <Filter className="w-3.5 h-3.5 text-cyan-400" /> Category:
+          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none pb-2.5 border-b border-slate-200/80 dark:border-slate-800">
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1 mr-1.5 shrink-0">
+              <Filter className="w-3.5 h-3.5 text-sky-600 dark:text-cyan-400" /> Category:
             </span>
             {categoriesList.map((cat) => {
               const active = categoryFilter === cat;
@@ -139,10 +138,10 @@ export const PeriodicGrid: React.FC = () => {
                 <button
                   key={cat}
                   onClick={() => setCategoryFilter(cat)}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-xl whitespace-nowrap transition-all border cursor-pointer ${
+                  className={`px-3 py-1.5 text-xs font-bold rounded-xl whitespace-nowrap shrink-0 transition-all border cursor-pointer ${
                     active
-                      ? 'bg-cyan-500 text-slate-950 border-cyan-400 shadow-md shadow-cyan-500/20'
-                      : 'bg-slate-900/80 text-slate-300 border-slate-700/70 hover:bg-slate-800 hover:text-white'
+                      ? 'bg-sky-600 dark:bg-cyan-500 text-white dark:text-slate-950 border-sky-600 dark:border-cyan-400 shadow-xs'
+                      : 'bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700/70 hover:bg-slate-200 dark:hover:bg-slate-700'
                   }`}
                 >
                   {cat === 'all' ? 'All (118)' : CATEGORY_LABELS[cat]}
@@ -156,18 +155,18 @@ export const PeriodicGrid: React.FC = () => {
             <div className="flex flex-wrap items-center gap-3">
               {/* Physical State Filter */}
               <div className="flex items-center gap-1.5">
-                <span className="text-slate-400 font-bold text-[11px] uppercase">State:</span>
-                <div className="flex items-center gap-1 bg-slate-950/80 p-1 rounded-xl border border-slate-800">
+                <span className="text-slate-500 dark:text-slate-400 font-bold text-[11px]">State:</span>
+                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-950/80 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
                   {statesList.map((st) => {
                     const active = stateFilter === st;
                     return (
                       <button
                         key={st}
                         onClick={() => setStateFilter(st)}
-                        className={`px-2.5 py-1 rounded-lg font-bold text-[11px] capitalize transition-all cursor-pointer ${
+                        className={`px-2.5 py-1 rounded-lg font-bold text-[11px] capitalize transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                           active
-                            ? 'bg-cyan-500 text-slate-950 shadow-sm'
-                            : 'text-slate-400 hover:text-white hover:bg-white/5'
+                            ? 'bg-white dark:bg-cyan-500 text-slate-900 dark:text-slate-950 shadow-xs'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                         }`}
                       >
                         {st}
@@ -179,18 +178,18 @@ export const PeriodicGrid: React.FC = () => {
 
               {/* Block Filter */}
               <div className="flex items-center gap-1.5">
-                <span className="text-slate-400 font-bold text-[11px] uppercase">Block:</span>
-                <div className="flex items-center gap-1 bg-slate-950/80 p-1 rounded-xl border border-slate-800">
+                <span className="text-slate-500 dark:text-slate-400 font-bold text-[11px]">Block:</span>
+                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-950/80 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
                   {blocksList.map((blk) => {
                     const active = blockFilter === blk;
                     return (
                       <button
                         key={blk}
                         onClick={() => setBlockFilter(blk)}
-                        className={`px-2.5 py-1 rounded-lg font-mono uppercase font-bold text-[11px] transition-all cursor-pointer ${
+                        className={`px-2.5 py-1 rounded-lg font-mono uppercase font-bold text-[11px] transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                           active
-                            ? 'bg-purple-500 text-white shadow-sm'
-                            : 'text-slate-400 hover:text-white hover:bg-white/5'
+                            ? 'bg-indigo-600 dark:bg-indigo-500 text-white shadow-xs'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                         }`}
                       >
                         {blk}
@@ -202,15 +201,15 @@ export const PeriodicGrid: React.FC = () => {
 
               {/* Group Dropdown */}
               <div className="flex items-center gap-1.5">
-                <span className="text-slate-400 font-bold text-[11px] uppercase">Group:</span>
+                <span className="text-slate-500 dark:text-slate-400 font-bold text-[11px]">Group:</span>
                 <select
                   value={groupFilter}
                   onChange={(e) => setGroupFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-                  className="px-2.5 py-1 text-xs rounded-xl bg-slate-950/80 border border-slate-800 text-white font-mono focus:border-cyan-400 focus:outline-none cursor-pointer"
+                  className="px-2.5 py-1 text-xs rounded-xl bg-slate-100 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white font-mono tabular-nums focus:border-sky-500 focus:outline-none cursor-pointer"
                 >
-                  <option value="all" className="bg-slate-900 text-white">All (1-18)</option>
+                  <option value="all" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">All (1-18)</option>
                   {Array.from({ length: 18 }, (_, i) => (
-                    <option key={i + 1} value={i + 1} className="bg-slate-900 text-white">
+                    <option key={i + 1} value={i + 1} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
                       Group {i + 1}
                     </option>
                   ))}
@@ -219,15 +218,15 @@ export const PeriodicGrid: React.FC = () => {
 
               {/* Period Dropdown */}
               <div className="flex items-center gap-1.5">
-                <span className="text-slate-400 font-bold text-[11px] uppercase">Period:</span>
+                <span className="text-slate-500 dark:text-slate-400 font-bold text-[11px]">Period:</span>
                 <select
                   value={periodFilter}
                   onChange={(e) => setPeriodFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-                  className="px-2.5 py-1 text-xs rounded-xl bg-slate-950/80 border border-slate-800 text-white font-mono focus:border-cyan-400 focus:outline-none cursor-pointer"
+                  className="px-2.5 py-1 text-xs rounded-xl bg-slate-100 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white font-mono tabular-nums focus:border-sky-500 focus:outline-none cursor-pointer"
                 >
-                  <option value="all" className="bg-slate-900 text-white">All (1-7)</option>
+                  <option value="all" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">All (1-7)</option>
                   {Array.from({ length: 7 }, (_, i) => (
-                    <option key={i + 1} value={i + 1} className="bg-slate-900 text-white">
+                    <option key={i + 1} value={i + 1} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
                       Period {i + 1}
                     </option>
                   ))}
@@ -238,12 +237,12 @@ export const PeriodicGrid: React.FC = () => {
             {/* Active Filters Counter & Reset Button */}
             {activeFiltersCount > 0 && (
               <div className="flex items-center gap-2">
-                <span className="px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 font-mono font-bold border border-cyan-500/30 text-xs">
+                <span className="px-2.5 py-1 rounded-lg bg-sky-500/10 text-sky-700 dark:text-cyan-300 font-mono tabular-nums font-bold border border-sky-500/30 text-xs">
                   {filteredElements.length} / 118
                 </span>
                 <button
                   onClick={resetFilters}
-                  className="flex items-center gap-1 px-3 py-1 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 font-bold transition-all border border-rose-500/30 cursor-pointer text-xs"
+                  className="flex items-center gap-1 px-3 py-1 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-700 dark:text-rose-300 font-bold transition-all border border-rose-500/30 cursor-pointer text-xs"
                 >
                   <RotateCcw className="w-3.5 h-3.5" /> Reset
                 </button>
@@ -253,40 +252,40 @@ export const PeriodicGrid: React.FC = () => {
         </div>
 
         {/* Desktop Live Element Quick-Telemetry Card (4 cols on XL PC) */}
-        <div className="xl:col-span-4 glass-panel p-4 rounded-2xl shadow-xl border border-white/10 flex items-center justify-between gap-4">
+        <div className="xl:col-span-4 bg-white dark:bg-slate-900/90 p-4 rounded-2xl shadow-xs border border-slate-200/90 dark:border-slate-800 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3.5 min-w-0">
             <div
               onClick={() => setSelectedElement(previewElement)}
-              className={`w-16 h-16 rounded-2xl flex flex-col items-center justify-center border border-white/25 shadow-lg shrink-0 cursor-pointer transition-transform hover:scale-105 ${
-                CATEGORY_COLORS[previewElement.category]?.bg || 'bg-slate-800'
+              className={`w-16 h-16 rounded-2xl flex flex-col items-center justify-center border shadow-xs shrink-0 cursor-pointer transition-transform hover:scale-105 ${
+                CATEGORY_COLORS[previewElement.category]?.bg || 'bg-slate-200 dark:bg-slate-800'
               }`}
             >
-              <span className="text-[10px] font-mono font-bold text-white/80 leading-none">
+              <span className="text-[10px] font-mono tabular-nums font-bold text-slate-700 dark:text-slate-200 leading-none">
                 {previewElement.atomicNumber}
               </span>
-              <span className="text-2xl font-black text-white leading-tight">
+              <span className="text-2xl font-extrabold text-slate-900 dark:text-white leading-tight">
                 {previewElement.symbol}
               </span>
-              <span className="text-[9px] font-mono text-white/75 leading-none">
+              <span className="text-[9px] font-mono tabular-nums text-slate-600 dark:text-slate-300 leading-none">
                 {previewElement.atomicMass.toFixed(2)}
               </span>
             </div>
 
             <div className="min-w-0 space-y-1">
               <div className="flex items-center gap-2">
-                <h3 className="text-base font-black text-white truncate">{previewElement.name}</h3>
-                <span className="px-2 py-0.5 rounded-md bg-white/10 text-cyan-300 text-[10px] font-mono font-bold uppercase shrink-0">
-                  {previewElement.block}-block
+                <h3 className="text-base font-extrabold text-slate-900 dark:text-white truncate">{previewElement.name}</h3>
+                <span className="text-xs font-mono text-sky-600 dark:text-cyan-400 font-bold shrink-0">
+                  · {previewElement.block}-block
                 </span>
               </div>
-              <div className="text-xs font-mono text-emerald-300 truncate">
+              <div className="text-xs font-mono text-emerald-700 dark:text-emerald-400 truncate">
                 {previewElement.electronConfiguration}
               </div>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-300 font-mono">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-600 dark:text-slate-300 font-mono tabular-nums">
                 <span>EN: <strong>{previewElement.electronegativity ?? 'N/A'}</strong></span>
-                <span>•</span>
-                <span>State: <strong className="capitalize text-cyan-300">{previewElement.state}</strong></span>
-                <span>•</span>
+                <span>·</span>
+                <span>State: <strong className="capitalize text-sky-700 dark:text-cyan-300">{previewElement.state}</strong></span>
+                <span>·</span>
                 <span>G{previewElement.group}/P{previewElement.period}</span>
               </div>
             </div>
@@ -295,7 +294,7 @@ export const PeriodicGrid: React.FC = () => {
           <div className="flex flex-col gap-1.5 shrink-0">
             <button
               onClick={() => setSelectedElement(previewElement)}
-              className="px-3 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/30 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-all"
+              className="px-3 py-1.5 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-700 dark:text-cyan-300 border border-sky-500/30 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap shrink-0"
             >
               <ExternalLink className="w-3 h-3" /> Details
             </button>
@@ -304,7 +303,7 @@ export const PeriodicGrid: React.FC = () => {
                 setSelectedElement(previewElement);
                 setViewMode('3d-atom');
               }}
-              className="px-3 py-1.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/30 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-all"
+              className="px-3 py-1.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap shrink-0"
             >
               <Atom className="w-3 h-3" /> 3D Atom
             </button>
@@ -314,17 +313,17 @@ export const PeriodicGrid: React.FC = () => {
 
       {/* Heatmap Spectrum Legend (Visible if Heatmap Property Selected) */}
       {heatmapProperty !== 'none' && (
-        <div className="flex items-center justify-between gap-4 glass-panel p-3.5 rounded-2xl shadow-xl">
+        <div className="flex items-center justify-between gap-4 bg-white dark:bg-slate-900/90 p-3.5 rounded-2xl shadow-xs border border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-cyan-300" />
-            <span className="font-extrabold text-white capitalize tracking-wide text-xs sm:text-sm">
+            <Sparkles className="w-4 h-4 text-sky-600 dark:text-cyan-400" />
+            <span className="font-extrabold text-slate-900 dark:text-white capitalize tracking-wide text-xs sm:text-sm">
               {heatmapProperty.replace(/([A-Z])/g, ' $1')} Spectrum
             </span>
           </div>
-          <div className="flex items-center gap-3 flex-1 max-w-md">
-            <span className="font-mono text-cyan-300 font-bold text-xs">{minVal.toFixed(1)}</span>
-            <div className="h-3.5 flex-1 rounded-full bg-gradient-to-r from-blue-600 via-cyan-400 via-emerald-400 via-amber-400 to-rose-600 shadow-inner border border-white/10" />
-            <span className="font-mono text-rose-400 font-bold text-xs">{maxVal.toFixed(1)}</span>
+          <div className="flex items-center gap-3 flex-1 max-w-md font-mono tabular-nums">
+            <span className="text-sky-600 dark:text-cyan-300 font-bold text-xs">{minVal.toFixed(1)}</span>
+            <div className="h-3.5 flex-1 rounded-full bg-gradient-to-r from-blue-600 via-cyan-400 via-emerald-400 via-amber-400 to-rose-600 border border-slate-200 dark:border-white/10" />
+            <span className="text-rose-600 dark:text-rose-400 font-bold text-xs">{maxVal.toFixed(1)}</span>
           </div>
         </div>
       )}
@@ -333,7 +332,7 @@ export const PeriodicGrid: React.FC = () => {
       <div className="overflow-x-auto lg:overflow-x-visible pb-2 custom-scrollbar w-full">
         <div className="w-full min-w-[980px] lg:min-w-0 grid grid-cols-[28px_repeat(18,minmax(0,1fr))] xl:grid-cols-[34px_repeat(18,minmax(0,1fr))] gap-1 sm:gap-1.5 xl:gap-2">
           {/* Top Left Period/Group Header Label */}
-          <div className="flex items-center justify-center text-[10px] font-mono text-slate-500 font-bold">
+          <div className="flex items-center justify-center text-[10px] font-mono text-slate-400 dark:text-slate-500 font-bold">
             P\G
           </div>
 
@@ -346,10 +345,10 @@ export const PeriodicGrid: React.FC = () => {
                 key={`group-num-${gNum}`}
                 onClick={() => setGroupFilter(activeGroup ? 'all' : gNum)}
                 title={`Filter by Group ${gNum}`}
-                className={`text-center text-[10px] xl:text-xs font-mono font-bold py-1 rounded-lg transition-colors cursor-pointer flex items-center justify-center ${
+                className={`text-center text-[10px] xl:text-xs font-mono tabular-nums font-bold py-1 rounded-lg transition-colors cursor-pointer flex items-center justify-center ${
                   activeGroup
-                    ? 'bg-cyan-500 text-slate-950 font-black'
-                    : 'text-slate-400 hover:text-cyan-300 hover:bg-slate-900/60'
+                    ? 'bg-sky-600 dark:bg-cyan-500 text-white dark:text-slate-950 font-black'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-sky-600 dark:hover:text-cyan-300 hover:bg-slate-200/60 dark:hover:bg-slate-900/60'
                 }`}
               >
                 {gNum}
@@ -366,10 +365,10 @@ export const PeriodicGrid: React.FC = () => {
                 {/* Period Number Label on Left (Clickable filter) */}
                 <button
                   onClick={() => setPeriodFilter(activePeriod ? 'all' : periodNum)}
-                  className={`flex items-center justify-center font-mono text-xs font-extrabold rounded-xl h-full min-h-[60px] lg:min-h-[68px] xl:min-h-[76px] 2xl:min-h-[82px] border transition-colors cursor-pointer ${
+                  className={`flex items-center justify-center font-mono tabular-nums text-xs font-extrabold rounded-xl h-full min-h-[60px] lg:min-h-[68px] xl:min-h-[76px] 2xl:min-h-[82px] border transition-colors cursor-pointer ${
                     activePeriod
-                      ? 'bg-cyan-500 text-slate-950 border-cyan-400'
-                      : 'text-cyan-400 bg-slate-900/70 border-slate-800/80 hover:bg-slate-800'
+                      ? 'bg-sky-600 dark:bg-cyan-500 text-white dark:text-slate-950 border-sky-600 dark:border-cyan-400'
+                      : 'text-sky-700 dark:text-cyan-400 bg-white dark:bg-slate-900/70 border-slate-200 dark:border-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-800'
                   }`}
                   title={`Filter by Period ${periodNum}`}
                 >
@@ -386,11 +385,11 @@ export const PeriodicGrid: React.FC = () => {
                       <button
                         key="la-placeholder"
                         onClick={() => setCategoryFilter(categoryFilter === 'lanthanide' ? 'all' : 'lanthanide')}
-                        className="flex flex-col items-center justify-center p-1 rounded-xl bg-indigo-950/50 hover:bg-indigo-900/60 border border-indigo-500/40 text-indigo-300 text-center h-full min-h-[60px] lg:min-h-[68px] xl:min-h-[76px] 2xl:min-h-[82px] shadow-sm select-none cursor-pointer transition-colors"
+                        className="flex flex-col items-center justify-center p-1 rounded-xl bg-indigo-100/80 dark:bg-indigo-950/50 hover:bg-indigo-200/80 dark:hover:bg-indigo-900/60 border border-indigo-300 dark:border-indigo-500/40 text-indigo-900 dark:text-indigo-200 text-center h-full min-h-[60px] lg:min-h-[68px] xl:min-h-[76px] 2xl:min-h-[82px] shadow-xs select-none cursor-pointer transition-colors"
                       >
-                        <span className="text-[9px] xl:text-[10px] font-mono font-bold text-indigo-200">57-71</span>
-                        <span className="text-[8.5px] font-semibold text-indigo-300">La-Lu</span>
-                        <span className="text-[7px] text-indigo-400/80 leading-none hidden xl:block">Lanthanides</span>
+                        <span className="text-[9px] xl:text-[10px] font-mono tabular-nums font-bold">57-71</span>
+                        <span className="text-[8.5px] font-semibold">La-Lu</span>
+                        <span className="text-[7px] opacity-80 leading-none hidden xl:block">Lanthanides</span>
                       </button>
                     );
                   }
@@ -401,11 +400,11 @@ export const PeriodicGrid: React.FC = () => {
                       <button
                         key="ac-placeholder"
                         onClick={() => setCategoryFilter(categoryFilter === 'actinide' ? 'all' : 'actinide')}
-                        className="flex flex-col items-center justify-center p-1 rounded-xl bg-fuchsia-950/50 hover:bg-fuchsia-900/60 border border-fuchsia-500/40 text-fuchsia-300 text-center h-full min-h-[60px] lg:min-h-[68px] xl:min-h-[76px] 2xl:min-h-[82px] shadow-sm select-none cursor-pointer transition-colors"
+                        className="flex flex-col items-center justify-center p-1 rounded-xl bg-fuchsia-100/80 dark:bg-fuchsia-950/50 hover:bg-fuchsia-200/80 dark:hover:bg-fuchsia-900/60 border border-fuchsia-300 dark:border-fuchsia-500/40 text-fuchsia-900 dark:text-fuchsia-200 text-center h-full min-h-[60px] lg:min-h-[68px] xl:min-h-[76px] 2xl:min-h-[82px] shadow-xs select-none cursor-pointer transition-colors"
                       >
-                        <span className="text-[9px] xl:text-[10px] font-mono font-bold text-fuchsia-200">89-103</span>
-                        <span className="text-[8.5px] font-semibold text-fuchsia-300">Ac-Lr</span>
-                        <span className="text-[7px] text-fuchsia-400/80 leading-none hidden xl:block">Actinides</span>
+                        <span className="text-[9px] xl:text-[10px] font-mono tabular-nums font-bold">89-103</span>
+                        <span className="text-[8.5px] font-semibold">Ac-Lr</span>
+                        <span className="text-[7px] opacity-80 leading-none hidden xl:block">Actinides</span>
                       </button>
                     );
                   }
@@ -444,10 +443,10 @@ export const PeriodicGrid: React.FC = () => {
         </div>
 
         {/* Lanthanides & Actinides Separated Rows (f-block) */}
-        <div className="w-full min-w-[980px] lg:min-w-0 mt-4 pt-3 border-t border-slate-800/80 space-y-1.5 xl:space-y-2">
+        <div className="w-full min-w-[980px] lg:min-w-0 mt-4 pt-3 border-t border-slate-200 dark:border-slate-800/80 space-y-1.5 xl:space-y-2">
           {/* Lanthanides Row */}
           <div className="grid grid-cols-[28px_repeat(18,minmax(0,1fr))] xl:grid-cols-[34px_repeat(18,minmax(0,1fr))] gap-1 sm:gap-1.5 xl:gap-2">
-            <div className="col-start-1 col-span-3 text-right pr-2 flex items-center justify-end text-[10px] xl:text-[11px] font-bold text-indigo-400 uppercase tracking-wider select-none">
+            <div className="col-start-1 col-span-3 text-right pr-2 flex items-center justify-end text-[10px] xl:text-[11px] font-bold text-indigo-700 dark:text-indigo-400 select-none">
               57–71 Lanthanides
             </div>
             <div
@@ -478,7 +477,7 @@ export const PeriodicGrid: React.FC = () => {
 
           {/* Actinides Row */}
           <div className="grid grid-cols-[28px_repeat(18,minmax(0,1fr))] xl:grid-cols-[34px_repeat(18,minmax(0,1fr))] gap-1 sm:gap-1.5 xl:gap-2">
-            <div className="col-start-1 col-span-3 text-right pr-2 flex items-center justify-end text-[10px] xl:text-[11px] font-bold text-fuchsia-400 uppercase tracking-wider select-none">
+            <div className="col-start-1 col-span-3 text-right pr-2 flex items-center justify-end text-[10px] xl:text-[11px] font-bold text-fuchsia-700 dark:text-fuchsia-400 select-none">
               89–103 Actinides
             </div>
             <div
@@ -510,7 +509,7 @@ export const PeriodicGrid: React.FC = () => {
       </div>
 
       {/* Category Color Legend Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-10 gap-2 pt-3 border-t border-slate-800/80">
+      <div className="grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-10 gap-2 pt-3 border-t border-slate-200 dark:border-slate-800/80">
         {Object.entries(CATEGORY_LABELS).map(([catKey, label]) => {
           const style = CATEGORY_COLORS[catKey as ElementCategory];
           if (!style) return null;
@@ -519,11 +518,11 @@ export const PeriodicGrid: React.FC = () => {
               key={catKey}
               onClick={() => setCategoryFilter(catKey === categoryFilter ? 'all' : (catKey as ElementCategory))}
               className={`flex items-center gap-2 p-2 rounded-xl border text-[11px] text-left transition-all cursor-pointer ${style.bg} ${
-                categoryFilter === catKey ? 'ring-2 ring-cyan-400 font-bold' : 'hover:opacity-90 border-white/10'
+                categoryFilter === catKey ? 'ring-2 ring-sky-500 dark:ring-cyan-400 font-bold' : 'hover:opacity-90'
               }`}
             >
-              <div className={`w-2.5 h-2.5 rounded-full border shrink-0 ${style.border}`} />
-              <span className="truncate font-semibold text-white">{label}</span>
+              <div className={`w-2.5 h-2.5 rounded-sm border shrink-0 ${style.border}`} />
+              <span className="truncate font-semibold">{label}</span>
             </button>
           );
         })}
@@ -531,4 +530,3 @@ export const PeriodicGrid: React.FC = () => {
     </div>
   );
 };
-

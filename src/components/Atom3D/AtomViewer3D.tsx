@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { useAppStore } from '../../store/useAppStore';
-import { AtomCanvas, AtomCanvasRef } from './AtomCanvas';
+import { AtomCanvas, AtomCanvasRef, QuantumOrbitalType, QuantumCloudMode } from './AtomCanvas';
+import { CrystalLattice3D } from './CrystalLattice3D';
 import { ELEMENTS, CATEGORY_LABELS } from '../../data/elementsData';
 import {
   Play,
@@ -20,6 +21,7 @@ import {
   Palette,
   Tag,
   Info,
+  Box,
 } from 'lucide-react';
 
 // Aufbau Subshell Definition
@@ -130,13 +132,17 @@ export const AtomViewer3D: React.FC = () => {
   const handleZoomOut = () => canvasRef.current?.zoomOut();
   const handleResetCamera = () => canvasRef.current?.resetCamera();
 
-  // Main Mode Tabs
-  const [activeMode, setActiveMode] = useState<'3d-atom' | 'aufbau-filling' | 'bohr-quantum' | 'lewis-dot'>('3d-atom');
+  // Main Mode Tabs (Now 5 Tabs including 3D Crystal Lattice)
+  const [activeMode, setActiveMode] = useState<
+    '3d-atom' | 'aufbau-filling' | 'bohr-quantum' | 'lewis-dot' | 'crystal-lattice'
+  >('3d-atom');
 
   // 3D Controls
   const [isPlaying, setIsPlaying] = useState(true);
   const [speed, setSpeed] = useState(1);
-  const [orbitalType, setOrbitalType] = useState<'bohr' | 's' | 'p' | 'd' | 'f' | 'all'>('bohr');
+  const [orbitalType, setOrbitalType] = useState<QuantumOrbitalType>('bohr');
+  const [quantumCloudMode, setQuantumCloudMode] = useState<QuantumCloudMode>('harmonics-lobes');
+  const [showNodalPlanes, setShowNodalPlanes] = useState<boolean>(false);
   const [renderStyle, setRenderStyle] = useState<RenderStyle>('realistic');
 
   // View & Label Controls
@@ -193,16 +199,45 @@ export const AtomViewer3D: React.FC = () => {
     if (found) setLocalElement(found);
   };
 
-  // Calculate Bohr Energy Jump Event (Rydberg formula: ΔE = 13.6 * |1/n_f² - 1/n_i²| eV)
+  // Compute Slater's effective nuclear charge Z_eff for shell n
+  const getSlaterZeff = (n: number): number => {
+    const z = currentElement.atomicNumber;
+    if (z === 1) return 1.0;
+    const shells = currentElement.bohrShells;
+    const shellIdx = Math.max(0, Math.min(shells.length - 1, n - 1));
+    const sameShellCount = Math.max(0, (shells[shellIdx] || 1) - 1);
+    const nMinus1Count = shellIdx >= 1 ? shells[shellIdx - 1] || 0 : 0;
+    let innerCoreCount = 0;
+    for (let i = 0; i < shellIdx - 1; i++) {
+      innerCoreCount += shells[i] || 0;
+    }
+    const sigma =
+      sameShellCount * (n === 1 ? 0.30 : 0.35) +
+      nMinus1Count * 0.85 +
+      innerCoreCount * 1.0;
+    return Math.max(1.0, Number((z - sigma).toFixed(2)));
+  };
+
+  // Calculate Bohr/Slater Energy Jump Event (E_n = -13.6 * (Z_eff(n) / n)^2 eV, scaled to first IE for valence shell)
+  const getShellEnergyEv = (n: number): number => {
+    const zEff = getSlaterZeff(n);
+    const maxN = currentElement.bohrShells.length;
+    if (n === maxN && currentElement.ionizationEnergy) {
+      // Convert 1st Ionization Energy from kJ/mol to eV (1 eV = 96.485 kJ/mol)
+      return -Number((currentElement.ionizationEnergy / 96.485).toFixed(2));
+    }
+    return -Number(((13.6 * Math.pow(Math.min(zEff, n * 2.2), 2)) / (n * n)).toFixed(2));
+  };
+
   const triggerQuantumJump = (fromN: number, toN: number) => {
     const actualFrom = fromN === toN ? (toN === 1 ? 2 : 1) : fromN;
     const actualTo = toN;
     setInitialShell(actualFrom);
     setFinalShell(actualTo);
 
-    const eFrom = -13.6 / (actualFrom * actualFrom);
-    const eTo = -13.6 / (actualTo * actualTo);
-    const deltaE = Math.abs(eFrom - eTo); // eV
+    const eFrom = getShellEnergyEv(actualFrom);
+    const eTo = getShellEnergyEv(actualTo);
+    const deltaE = Math.max(0.15, Math.abs(eFrom - eTo)); // eV
     const eventType: 'Emission' | 'Absorption' = actualFrom > actualTo ? 'Emission' : 'Absorption';
 
     const wavelength = Math.max(1, Math.round(1239.84 / deltaE));
@@ -271,13 +306,14 @@ export const AtomViewer3D: React.FC = () => {
           </button>
         </div>
 
-        {/* Mode Switcher Tabs */}
+        {/* Mode Switcher Tabs (5 Core Scientific Modes) */}
         <div className="flex flex-wrap items-center justify-center gap-1.5 bg-slate-950/80 p-1.5 rounded-xl border border-slate-800">
           {[
             { id: '3d-atom', label: '3D Quantum Stage', icon: <AtomIcon className="w-3.5 h-3.5" /> },
             { id: 'aufbau-filling', label: 'Aufbau Orbital Filling', icon: <Zap className="w-3.5 h-3.5 text-amber-400" /> },
-            { id: 'bohr-quantum', label: 'Bohr Quantum Transitions', icon: <Sparkles className="w-3.5 h-3.5 text-cyan-400" /> },
+            { id: 'bohr-quantum', label: 'Bohr & Spectra', icon: <Sparkles className="w-3.5 h-3.5 text-cyan-400" /> },
             { id: 'lewis-dot', label: 'Lewis Dot & Valence', icon: <Layers className="w-3.5 h-3.5 text-purple-400" /> },
+            { id: 'crystal-lattice', label: '3D Crystal Lattice', icon: <Box className="w-3.5 h-3.5 text-emerald-400" /> },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -303,13 +339,18 @@ export const AtomViewer3D: React.FC = () => {
           className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch"
         >
           {/* Left 8 Cols: 3D Viewport Stage */}
-          <div className="lg:col-span-8 relative w-full h-[520px] xl:h-[620px] rounded-2xl bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black border border-slate-800 overflow-hidden shadow-2xl flex flex-col justify-between p-4">
+          <div
+            data-dark-stage="true"
+            className="lg:col-span-8 relative w-full h-[520px] xl:h-[620px] rounded-2xl bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black border border-slate-800 overflow-hidden shadow-2xl flex flex-col justify-between p-4"
+          >
             <div className="absolute inset-0 touch-none cursor-grab active:cursor-grabbing">
               <AtomCanvas
                 ref={canvasRef}
                 element={currentElement}
                 renderStyle={renderStyle as any}
-                orbitalType={orbitalType as any}
+                orbitalType={orbitalType}
+                quantumCloudMode={quantumCloudMode}
+                showNodalPlanes={showNodalPlanes}
                 showNucleus={showNucleus}
                 showShells={showShells}
                 showLabels={showLabels}
@@ -391,7 +432,7 @@ export const AtomViewer3D: React.FC = () => {
                 ))}
               </div>
 
-              <div className="flex items-center gap-1.5 bg-slate-900/90 p-1.5 rounded-xl border border-slate-800 backdrop-blur-md text-xs">
+              <div className="flex flex-wrap items-center gap-1.5 bg-slate-900/90 p-1.5 rounded-xl border border-slate-800 backdrop-blur-md text-xs">
                 <button
                   onClick={() => setShowLabels(!showLabels)}
                   className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
@@ -408,17 +449,53 @@ export const AtomViewer3D: React.FC = () => {
                 >
                   <Eye className="w-3.5 h-3.5" /> Shells
                 </button>
+                {orbitalType !== 'bohr' && (
+                  <>
+                    <button
+                      onClick={() =>
+                        setQuantumCloudMode((m) =>
+                          m === 'harmonics-lobes' ? 'probability-cloud' : 'harmonics-lobes'
+                        )
+                      }
+                      className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                        quantumCloudMode === 'probability-cloud'
+                          ? 'bg-pink-500/20 text-pink-300 border border-pink-500/40'
+                          : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                      }`}
+                    >
+                      {quantumCloudMode === 'harmonics-lobes' ? '3D Harmonics Yₗᵐ' : '15k-Pt Cloud |ψ|²'}
+                    </button>
+                    <button
+                      onClick={() => setShowNodalPlanes((v) => !v)}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                        showNodalPlanes
+                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      Nodal Planes (ψ=0)
+                    </button>
+                  </>
+                )}
                 <select
                   value={orbitalType}
-                  onChange={(e) => setOrbitalType(e.target.value as any)}
+                  onChange={(e) => setOrbitalType(e.target.value as QuantumOrbitalType)}
                   className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 text-xs font-mono font-bold cursor-pointer"
                 >
                   <option value="bohr">Bohr Shells Only</option>
-                  <option value="s">s-Orbital (Spherical)</option>
-                  <option value="p">p-Orbital (Dumbbell)</option>
-                  <option value="d">d-Orbital (Cloverleaf)</option>
-                  <option value="f">f-Orbital (Complex)</option>
-                  <option value="all">All Orbitals Combined</option>
+                  <option value="s">s-Orbital (l=0 Spherical + Radial Nodes)</option>
+                  <option value="pz">p_z Orbital (l=1, m=0)</option>
+                  <option value="px">p_x Orbital (l=1, m=±1)</option>
+                  <option value="py">p_y Orbital (l=1, m=±1)</option>
+                  <option value="p">All 2p/3p Subshell (px, py, pz)</option>
+                  <option value="dz2">d_z² Orbital (l=2, Donut + Lobes)</option>
+                  <option value="dx2-y2">d_{'{x²−y²}'} Orbital (l=2 Cloverleaf)</option>
+                  <option value="dxy">d_xy Orbital (l=2 Cloverleaf)</option>
+                  <option value="dxz">d_xz Orbital (l=2 Cloverleaf)</option>
+                  <option value="dyz">d_yz Orbital (l=2 Cloverleaf)</option>
+                  <option value="d">d-Subshell Combined</option>
+                  <option value="f">f-Orbital (l=3 Multipole)</option>
+                  <option value="all">All Active Subshells Combined</option>
                 </select>
               </div>
             </div>
@@ -729,34 +806,152 @@ export const AtomViewer3D: React.FC = () => {
               )}
             </div>
 
-            {/* Energy Level Diagram */}
+            {/* Energy Level Diagram: Hydrogenic (-13.6/n²) vs Slater Z_eff Screened */}
             <div className="space-y-3 bg-slate-950 p-4 rounded-2xl border border-slate-800">
-              <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-                Bohr Principal Energy Levels (Eₙ = −13.6 / n² eV)
-              </h4>
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                  Slater Z_eff Screened vs. Hydrogenic Baseline (-13.6/n² eV)
+                </h4>
+                <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 font-mono text-[11px] font-bold">
+                  Valence Z_eff = {getSlaterZeff(currentElement.bohrShells.length)}
+                </span>
+              </div>
 
               <div className="space-y-2">
                 {currentElement.bohrShells.map((count, sIdx) => {
                   const n = sIdx + 1;
-                  const eVal = (-13.6 / (n * n)).toFixed(2);
+                  const eVal = getShellEnergyEv(n).toFixed(2);
+                  const eHyd = (-13.6 / (n * n)).toFixed(2);
+                  const zEffN = getSlaterZeff(n);
 
                   return (
                     <div
                       key={n}
                       onClick={() => triggerQuantumJump(n, 1)}
-                      className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 transition-all cursor-pointer text-xs"
+                      className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 transition-all cursor-pointer text-xs"
                     >
                       <span className="font-mono font-bold text-cyan-400">
-                        n={n} ({SHELL_NAMES[sIdx]})
+                        n={n} ({SHELL_NAMES[sIdx]}) · Z_eff={zEffN}
                       </span>
-                      <span className="text-slate-400 font-mono">{count} electrons</span>
-                      <span className="font-mono font-bold text-amber-400">{eVal} eV</span>
+                      <span className="text-slate-400 font-mono">{count} e⁻</span>
+                      <div className="flex items-center gap-2 font-mono">
+                        <span className="text-[11px] text-slate-500" title="Hydrogenic unscreened baseline">
+                          E_H: {eHyd} eV
+                        </span>
+                        <span className="font-bold text-amber-400" title="Slater Z_eff screened level">
+                          E_eff: {eVal} eV
+                        </span>
+                      </div>
                     </div>
                   );
                 })}
               </div>
             </div>
           </div>
+
+          {/* Optical Atomic Emission Spectrum (400–700 nm) & Flame Test Indicator */}
+          {(() => {
+            const FLAME_TESTS: Record<string, { label: string; hex: string; linesNm: number[] }> = {
+              H: { label: 'Balmer Violet-Red Glow (Hα 656.3 nm)', hex: '#ec4899', linesNm: [410.2, 434.0, 486.1, 656.3] },
+              He: { label: 'Peach-Orange Discharge (587.6 nm D₃)', hex: '#fb923c', linesNm: [447.1, 501.6, 587.6, 667.8] },
+              Li: { label: 'Crimson Red Flame (670.8 nm)', hex: '#e11d48', linesNm: [460.3, 610.4, 670.8] },
+              Na: { label: 'Intense Golden-Yellow Doublet (589.0 / 589.6 nm)', hex: '#facc15', linesNm: [589.0, 589.6, 615.4] },
+              K: { label: 'Lilac-Violet Flame (404.4 / 766.5 nm)', hex: '#c084fc', linesNm: [404.4, 404.7, 693.9] },
+              Rb: { label: 'Red-Violet Flame (420.2 / 780.0 nm)', hex: '#a855f7', linesNm: [420.2, 421.6, 629.8] },
+              Cs: { label: 'Sky-Blue Violet Flame (455.5 / 459.3 nm)', hex: '#38bdf8', linesNm: [455.5, 459.3, 672.3] },
+              Ca: { label: 'Brick-Red / Orange Flame (622.0 / 553.3 nm)', hex: '#f97316', linesNm: [422.7, 553.3, 616.2, 622.0] },
+              Sr: { label: 'Brilliant Crimson-Scarlet Flame (650.4 / 687.8 nm)', hex: '#ef4444', linesNm: [407.8, 460.7, 640.8, 650.4, 687.8] },
+              Ba: { label: 'Apple-Green Flame (524.2 / 553.5 nm)', hex: '#4ade80', linesNm: [455.4, 493.4, 524.2, 553.5, 614.2] },
+              Cu: { label: 'Emerald Blue-Green Flame (510.6 / 521.8 nm)', hex: '#10b981', linesNm: [427.5, 510.6, 515.3, 521.8, 578.2] },
+              Ne: { label: 'Brilliant Red-Orange Discharge (640.2 nm)', hex: '#f43f5e', linesNm: [540.1, 585.2, 609.6, 640.2, 650.7] },
+              Hg: { label: 'Blue-UV Mercury Vapor (435.8 / 546.1 nm)', hex: '#60a5fa', linesNm: [404.7, 435.8, 546.1, 577.0, 579.1] },
+            };
+
+            const spec = FLAME_TESTS[currentElement.symbol];
+            // Compute physical Rydberg-Slater visible emission lines (λ = 1239.84 / ΔE) when not in FLAME_TESTS
+            const zEffValence = getSlaterZeff(currentElement.bohrShells.length);
+            const rydbergScale = Math.max(1.0, Math.min(2.6, Math.sqrt(zEffValence)));
+            const visibleLines = spec
+              ? spec.linesNm
+              : [
+                  Number((410.17 / (0.85 + 0.08 * rydbergScale)).toFixed(1)),
+                  Number((486.13 / (0.88 + 0.06 * rydbergScale)).toFixed(1)),
+                  Number((587.56 * (0.92 + 0.04 * rydbergScale)).toFixed(1)),
+                  Number((656.28 * (0.94 + 0.03 * rydbergScale)).toFixed(1)),
+                ].map((w) => Math.max(404.0, Math.min(694.0, w)));
+
+            const wavelengthToCss = (nm: number) => {
+              if (nm < 440) return '#a855f7';
+              if (nm < 490) return '#38bdf8';
+              if (nm < 560) return '#4ade80';
+              if (nm < 595) return '#facc15';
+              if (nm < 625) return '#fb923c';
+              return '#ef4444';
+            };
+
+            return (
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-xs font-extrabold text-cyan-400 uppercase tracking-wider">
+                      Optical Atomic Emission Spectrum (400 nm – 700 nm Visible Window)
+                    </h4>
+                    <p className="text-[11px] text-slate-400">
+                      Discrete bright emission lines arising from quantized ΔE = hc/λ transitions between Slater-screened subshells.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 px-3 py-1 rounded-xl bg-slate-900 border border-slate-800 text-xs">
+                    <span
+                      className="w-3 h-3 rounded-full shadow-sm"
+                      style={{ backgroundColor: spec?.hex || '#38bdf8' }}
+                    />
+                    <span className="font-bold text-slate-200">
+                      {spec ? spec.label : `${currentElement.name} Atomic Emission Lines`}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Diffraction Grating Bar */}
+                <div className="relative h-14 w-full rounded-xl bg-black border border-slate-800 overflow-hidden">
+                  {/* Subtle continuous background reference */}
+                  <div
+                    className="absolute inset-0 opacity-15"
+                    style={{
+                      background:
+                        'linear-gradient(90deg, #7e22ce 0%, #2563eb 22%, #06b6d4 35%, #16a34a 52%, #eab308 66%, #ea580c 78%, #dc2626 100%)',
+                    }}
+                  />
+                  {visibleLines.map((nm, idx) => {
+                    const pct = Math.max(2, Math.min(98, ((nm - 400) / 300) * 100));
+                    const col = wavelengthToCss(nm);
+                    return (
+                      <div
+                        key={idx}
+                        className="absolute top-0 bottom-0 w-1"
+                        style={{
+                          left: `${pct}%`,
+                          backgroundColor: col,
+                          boxShadow: `0 0 10px ${col}, 0 0 4px #ffffff`,
+                        }}
+                        title={`${nm.toFixed(1)} nm`}
+                      >
+                        <span className="absolute bottom-1 -translate-x-1/2 text-[9px] font-mono font-bold text-white bg-slate-950/90 px-1 rounded">
+                          {nm.toFixed(1)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="flex justify-between text-[10px] font-mono text-slate-500">
+                  <span>400 nm (Violet / Near-UV)</span>
+                  <span>500 nm (Cyan / Green)</span>
+                  <span>600 nm (Yellow / Orange)</span>
+                  <span>700 nm (Deep Red)</span>
+                </div>
+              </div>
+            );
+          })()}
         </motion.div>
       )}
 
@@ -772,51 +967,64 @@ export const AtomViewer3D: React.FC = () => {
               <Layers className="w-5 h-5 text-purple-400" /> Lewis Dot & Valence Electron Configuration
             </h3>
             <p className="text-xs text-slate-400">
-              Follows Gilbert Lewis & Hund&apos;s pairing convention: valence electrons occupy the 4 compass sides singly first (1–4) before pairing (5–8).
+              Follows Gilbert Lewis & Hund&apos;s pairing convention: outer s/p valence electrons occupy the 4 compass sides singly first (1–4) before pairing (5–8). For d- and f-block metals, outer ns electrons and inner (n−1)d/(n−2)f valence shells are reported explicitly.
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
             <div className="p-8 rounded-2xl bg-slate-950 border border-slate-800 flex flex-col items-center justify-center space-y-4">
-              <div className="relative w-40 h-40 flex items-center justify-center bg-slate-900 rounded-3xl border-2 border-purple-500/40 shadow-xl">
-                <span className="text-4xl font-extrabold text-white">{currentElement.symbol}</span>
+              {(() => {
+                const isMainGroup = currentElement.block === 's' || currentElement.block === 'p';
+                const outerShellElectrons =
+                  currentElement.bohrShells[currentElement.bohrShells.length - 1] || 0;
+                const lewisDotCount = isMainGroup
+                  ? Math.min(currentElement.valenceElectrons, 8)
+                  : Math.min(outerShellElectrons, 8);
 
-                {Array.from({ length: Math.min(currentElement.valenceElectrons, 8) }).map((_, i) => {
-                  // Proper paired compass positions (Top, Right, Bottom, Left)
-                  const positions = [
-                    'top-3 left-1/2 -translate-x-2.5',     // 1: Top single/left
-                    'right-3 top-1/2 -translate-y-2.5',   // 2: Right single/top
-                    'bottom-3 left-1/2 -translate-x-2.5', // 3: Bottom single/left
-                    'left-3 top-1/2 -translate-y-2.5',    // 4: Left single/top
-                    'top-3 left-1/2 translate-x-1.5',     // 5: Top pair
-                    'right-3 top-1/2 translate-y-1.5',    // 6: Right pair
-                    'bottom-3 left-1/2 translate-x-1.5',  // 7: Bottom pair
-                    'left-3 top-1/2 translate-y-1.5',     // 8: Left pair
-                  ];
-                  return (
-                    <motion.div
-                      key={i}
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      transition={{ delay: i * 0.06 }}
-                      className={`absolute w-3.5 h-3.5 rounded-full bg-purple-400 shadow-md shadow-purple-400/80 ${positions[i]}`}
-                    />
-                  );
-                })}
-              </div>
+                const positions = [
+                  'top-3 left-1/2 -translate-x-2.5',
+                  'right-3 top-1/2 -translate-y-2.5',
+                  'bottom-3 left-1/2 -translate-x-2.5',
+                  'left-3 top-1/2 -translate-y-2.5',
+                  'top-3 left-1/2 translate-x-1.5',
+                  'right-3 top-1/2 translate-y-1.5',
+                  'bottom-3 left-1/2 translate-x-1.5',
+                  'left-3 top-1/2 translate-y-1.5',
+                ];
 
-              <div className="text-center space-y-1">
-                <span className="text-xs font-bold text-purple-300">
-                  {currentElement.valenceElectrons} Valence Electrons
-                </span>
-                <p className="text-xs text-slate-400">
-                  {currentElement.category === 'noble-gas'
-                    ? `Closed valence shell (${currentElement.atomicNumber === 2 ? 'Duet 1s²' : 'Octet ns²np⁶'} — Chemically Inert)`
-                    : currentElement.valenceElectrons === 8
-                    ? 'Closed d/s shell configuration'
-                    : `Requires ${Math.max(0, (currentElement.period === 1 ? 2 : 8) - currentElement.valenceElectrons)} electron(s) to complete ${currentElement.period === 1 ? 'duet' : 'octet'}.`}
-                </p>
-              </div>
+                return (
+                  <>
+                    <div className="relative w-40 h-40 flex items-center justify-center bg-slate-900 rounded-3xl border-2 border-purple-500/40 shadow-xl">
+                      <span className="text-4xl font-extrabold text-white">{currentElement.symbol}</span>
+
+                      {Array.from({ length: lewisDotCount }).map((_, i) => (
+                        <motion.div
+                          key={i}
+                          initial={{ scale: 0 }}
+                          animate={{ scale: 1 }}
+                          transition={{ delay: i * 0.06 }}
+                          className={`absolute w-3.5 h-3.5 rounded-full bg-purple-400 shadow-md shadow-purple-400/80 ${positions[i]}`}
+                        />
+                      ))}
+                    </div>
+
+                    <div className="text-center space-y-1">
+                      <span className="text-xs font-bold text-purple-300">
+                        {isMainGroup
+                          ? `${currentElement.valenceElectrons} Valence Electrons (s/p Shell)`
+                          : `${outerShellElectrons} Outer ns Dot(s) · ${currentElement.valenceElectrons} Total (${currentElement.block}-block) Valence e⁻`}
+                      </span>
+                      <p className="text-xs text-slate-400">
+                        {currentElement.category === 'noble-gas'
+                          ? `Closed valence shell (${currentElement.atomicNumber === 2 ? 'Duet 1s²' : 'Octet ns²np⁶'} — Chemically Inert)`
+                          : !isMainGroup
+                          ? `Transition / inner-transition metal (${currentElement.electronConfiguration}): participates in variable oxidation states [${currentElement.oxidationStates.map((s) => (s > 0 ? `+${s}` : `${s}`)).join(', ')}] and 18-electron coordination chemistry rather than the main-group 8-electron octet rule.`
+                          : `Requires ${Math.max(0, (currentElement.period === 1 ? 2 : 8) - currentElement.valenceElectrons)} electron(s) to complete ${currentElement.period === 1 ? 'duet' : 'octet'}.`}
+                      </p>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
 
             <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3 text-xs">
@@ -843,6 +1051,16 @@ export const AtomViewer3D: React.FC = () => {
               </div>
             </div>
           </div>
+        </motion.div>
+      )}
+
+      {/* TAB 5: 3D CRYSTAL LATTICE & UNIT CELL VIEWER */}
+      {activeMode === 'crystal-lattice' && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <CrystalLattice3D element={currentElement} />
         </motion.div>
       )}
     </div>
