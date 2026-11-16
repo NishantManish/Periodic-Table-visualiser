@@ -1,11 +1,12 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   MOLECULES_LIBRARY,
   ISOMER_FAMILIES_META,
   getIsomersForMolecule,
   normalizeFormulaAscii,
 } from '@/data/moleculesData';
-import { MoleculeDossier, MoleculeAtomNode, MoleculeBondEdge } from '@/types';
+import { MoleculeDossier, MoleculeAtomNode, MoleculeBondEdge, PendingReactionSetup } from '@/types';
+import { useAppStore } from '@/store/useAppStore';
 import { MoleculeCanvas3D, RenderStyle3D, CPK_PALETTE } from './MoleculeCanvas3D';
 import {
   solveMolecularGraph3D,
@@ -102,7 +103,54 @@ function solveCustomMolecule3D(nodes: ComposerNode[], edges: ComposerEdge[]) {
   return solved;
 }
 
+function buildReactionSetupFromMolecule(mol: MoleculeDossier): PendingReactionSetup {
+  const idMap: Record<string, PendingReactionSetup> = {
+    ammonia: { reactantSymbols: ['N', 'H'], temperature: 450, pressure: 200, catalyst: true },
+    water: { reactantSymbols: ['H', 'O'], temperature: 500, pressure: 1, catalyst: true },
+    'carbon-dioxide': { reactantSymbols: ['C', 'O'], temperature: 700, pressure: 1, catalyst: false },
+    'sulfur-dioxide': { reactantSymbols: ['S', 'O'], temperature: 400, pressure: 1, catalyst: false },
+    'sulfuric-acid': { reactantSymbols: ['S', 'O'], temperature: 450, pressure: 2, catalyst: true },
+    'sodium-chloride': { reactantSymbols: ['Na', 'Cl'], temperature: 250, pressure: 1, catalyst: false },
+    methane: { reactantSymbols: ['C', 'H'], temperature: 400, pressure: 50, catalyst: true },
+    ethene: { reactantSymbols: ['C', 'H'], temperature: 750, pressure: 1, catalyst: false },
+    ethanol: { reactantSymbols: ['C', 'H'], temperature: 280, pressure: 65, catalyst: true },
+    ozone: { reactantSymbols: ['O'], temperature: 25, pressure: 1, catalyst: false },
+    'boron-trifluoride': { reactantSymbols: ['B', 'F'], temperature: 150, pressure: 1, catalyst: false },
+    'phosphorus-pentachloride': { reactantSymbols: ['P', 'Cl'], temperature: 180, pressure: 1, catalyst: false },
+    'sulfur-hexafluoride': { reactantSymbols: ['S', 'F'], temperature: 300, pressure: 1, catalyst: false },
+    'xenon-tetrafluoride': { reactantSymbols: ['Xe', 'F'], temperature: 400, pressure: 6, catalyst: false },
+    'xenon-difluoride': { reactantSymbols: ['Xe', 'F'], temperature: 400, pressure: 1, catalyst: false },
+  };
+
+  if (idMap[mol.id]) {
+    return {
+      ...idMap[mol.id],
+      moleculeId: mol.id,
+      moleculeName: mol.name,
+      moleculeFormula: mol.formula,
+    };
+  }
+
+  const distinctSymbols = Array.from(new Set(mol.atoms.map((a) => a.symbol)));
+  const tempMatch = mol.synthesisMethods.industrial.conditions.match(/(\d{2,4})\s*°?C/);
+  const pressMatch = mol.synthesisMethods.industrial.conditions.match(/(\d+(?:\.\d+)?)\s*(?:atm|bar)/i);
+  const catText = mol.synthesisMethods.industrial.catalyst.toLowerCase();
+  const hasCat = catText.length > 0 && !catText.includes('none') && !catText.includes('uncatalyzed');
+
+  return {
+    reactantSymbols: distinctSymbols.slice(0, 3),
+    temperature: tempMatch ? parseInt(tempMatch[1], 10) : 250,
+    pressure: pressMatch ? Math.max(1, Math.round(parseFloat(pressMatch[1]))) : 1,
+    catalyst: hasCat,
+    moleculeId: mol.id,
+    moleculeName: mol.name,
+    moleculeFormula: mol.formula,
+  };
+}
+
 export const MoleculeVisualizer: React.FC = () => {
+  const { activeMoleculeId, setActiveMoleculeId, launchReactionSimulation } = useAppStore();
+
   // Top-level Workspace Mode
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('visualizer');
 
@@ -118,6 +166,20 @@ export const MoleculeVisualizer: React.FC = () => {
   const [comparisonMoleculeId, setComparisonMoleculeId] = useState<string | null>(null);
   const [activeDossierTab, setActiveDossierTab] = useState<DossierTab>('overview');
   const [selectedAtomIndex, setSelectedAtomIndex] = useState<number | null>(null);
+
+  // Sync deep-linked molecule from cross-lab navigation
+  useEffect(() => {
+    if (!activeMoleculeId) return;
+    const exists = allMolecules.some((m) => m.id === activeMoleculeId);
+    if (exists) {
+      setWorkspaceMode('visualizer');
+      setSelectedMoleculeId(activeMoleculeId);
+      setComparisonMoleculeId(null);
+      setActiveDossierTab('overview');
+      setSelectedAtomIndex(null);
+    }
+    setActiveMoleculeId(null);
+  }, [activeMoleculeId, allMolecules, setActiveMoleculeId]);
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -1086,10 +1148,20 @@ export const MoleculeVisualizer: React.FC = () => {
                   <div className="flex flex-col gap-4">
                     {/* Industrial Route */}
                     <div className="p-4 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/70 flex flex-col gap-2">
-                      <div className="flex items-center justify-between">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="px-2 py-0.5 rounded bg-indigo-600 text-white text-[10px] font-bold uppercase tracking-wider">
                           Industrial Manufacturing Process
                         </span>
+                        <button
+                          onClick={() =>
+                            launchReactionSimulation(buildReactionSetupFromMolecule(selectedMolecule))
+                          }
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shadow-sm transition-colors cursor-pointer"
+                        >
+                          <Flame className="w-3.5 h-3.5" />
+                          <span>Simulate in Reaction Chamber</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                       <h3 className="text-sm font-bold text-slate-900 dark:text-white">
                         {selectedMolecule.synthesisMethods.industrial.processName}

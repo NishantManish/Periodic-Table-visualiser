@@ -339,6 +339,11 @@ html.light .text-indigo-300:not([data-dark-stage="true"] *) {
   color: #4338ca !important;
 }
 
+html.light .text-pink-300:not([data-dark-stage="true"] *),
+html.light .text-pink-400:not([data-dark-stage="true"] *) {
+  color: #be185d !important;
+}
+
 /* 5. Harmonize borders in Light Mode */
 html.light .border-white\/5:not([data-dark-stage="true"] *),
 html.light .border-white\/10:not([data-dark-stage="true"] *),
@@ -351,3 +356,34 @@ html.light .border-slate-700\/80:not([data-dark-stage="true"] *),
 html.light .border-slate-700\/70:not([data-dark-stage="true"] *) {
   border-color: #cbd5e1 !important;
 }
+
+/* ============================================================================
+   PRINTABLE REVISION SHEET (@media print)
+   ============================================================================ */
+.print-only-sheet {
+  display: none;
+}
+
+@media print {
+  header,
+  nav,
+  .ambient-glow-bg,
+  .no-print {
+    display: none !important;
+  }
+
+  body,
+  html {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    font-size: 12pt !important;
+  }
+
+  .print-only-sheet {
+    display: block !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    padding: 0 !important;
+  }
+}
+

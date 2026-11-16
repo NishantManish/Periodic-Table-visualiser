@@ -463,3 +463,227 @@ export function expandSupercell(
     millerPlanes: generateMillerPlanes(),
   };
 }
+
+export type XraySourceId = 'CuKa' | 'MoKa' | 'CoKa';
+
+export interface XraySourceSpec {
+  id: XraySourceId;
+  label: string;
+  wavelengthAngstrom: number;
+}
+
+export const XRAY_SOURCES: Record<XraySourceId, XraySourceSpec> = {
+  CuKa: { id: 'CuKa', label: 'Cu Kα (1.5406 Å)', wavelengthAngstrom: 1.5406 },
+  MoKa: { id: 'MoKa', label: 'Mo Kα (0.7107 Å)', wavelengthAngstrom: 0.7107 },
+  CoKa: { id: 'CoKa', label: 'Co Kα (1.7889 Å)', wavelengthAngstrom: 1.7889 },
+};
+
+export interface CustomMillerPlaneResult {
+  active: boolean;
+  h: number;
+  k: number;
+  l: number;
+  label: string;
+  normal: [number, number, number];
+  position: [number, number, number];
+  quaternion: [number, number, number, number];
+  planeSize: number;
+  dSpacingPm: number;
+  dSpacingAngstrom: number;
+  braggThetaDeg: number | null;
+  braggTwoThetaDeg: number | null;
+  braggWithinEwaldSphere: boolean;
+  xrdReflectionStatus: 'Allowed' | 'Forbidden (Systematic Absence)';
+  xrdRuleNote: string;
+  color: string;
+}
+
+export function evaluateXrdSelectionRule(
+  system: LatticeSystemType,
+  h: number,
+  k: number,
+  l: number
+): { allowed: boolean; note: string } {
+  const ah = Math.abs(h);
+  const ak = Math.abs(k);
+  const al = Math.abs(l);
+  const sum = ah + ak + al;
+
+  if (system === 'BCC') {
+    const allowed = sum % 2 === 0;
+    return {
+      allowed,
+      note: allowed
+        ? `BCC Allowed: h + k + l = ${h + k + l} (even)`
+        : `BCC Forbidden: h + k + l = ${h + k + l} (odd cancels body-center phase)`,
+    };
+  }
+
+  if (system === 'FCC') {
+    const pH = ah % 2;
+    const pK = ak % 2;
+    const pL = al % 2;
+    const allowed = pH === pK && pK === pL;
+    return {
+      allowed,
+      note: allowed
+        ? 'FCC Allowed: h, k, l indices are unmixed (all even or all odd)'
+        : 'FCC Forbidden: mixed even/odd indices destructively interfere',
+    };
+  }
+
+  if (system === 'Diamond Cubic') {
+    const pH = ah % 2;
+    const pK = ak % 2;
+    const pL = al % 2;
+    const unmixed = pH === pK && pK === pL;
+    if (!unmixed) {
+      return {
+        allowed: false,
+        note: 'Diamond Forbidden: mixed even/odd indices are extinct',
+      };
+    }
+    const allOdd = pH === 1;
+    const divByFour = sum % 4 === 0;
+    const allowed = allOdd || divByFour;
+    return {
+      allowed,
+      note: allowed
+        ? allOdd
+          ? 'Diamond Allowed: all indices odd'
+          : `Diamond Allowed: all even & h+k+l = ${h + k + l} ≡ 0 (mod 4)`
+        : `Diamond Forbidden: all even but h+k+l = ${h + k + l} ≡ 2 (mod 4) (basis extinction, e.g. (200))`,
+    };
+  }
+
+  return {
+    allowed: true,
+    note: `${system}: primitive lattice reflection permitted`,
+  };
+}
+
+export function computeCustomMillerPlane(
+  system: LatticeSystemType,
+  h: number,
+  k: number,
+  l: number,
+  offsetFraction: number,
+  supercell: number,
+  latticeConstantPm: number,
+  xraySource: XraySourceId
+): CustomMillerPlaneResult {
+  const cellScale = 1.65;
+  const span = cellScale * supercell;
+
+  if (h === 0 && k === 0 && l === 0) {
+    return {
+      active: false,
+      h,
+      k,
+      l,
+      label: 'Off',
+      normal: [0, 0, 1],
+      position: [0, 0, 0],
+      quaternion: [0, 0, 0, 1],
+      planeSize: span,
+      dSpacingPm: 0,
+      dSpacingAngstrom: 0,
+      braggThetaDeg: null,
+      braggTwoThetaDeg: null,
+      braggWithinEwaldSphere: false,
+      xrdReflectionStatus: 'Allowed',
+      xrdRuleNote: 'Enter non-zero (h k l) Miller indices to inspect a plane.',
+      color: '#38bdf8',
+    };
+  }
+
+  // Note: Three.js coordinate mapping used in LatticeScene has crystal axes (a, b, c) aligned to (x, z, y)
+  const rawNormal = new THREE.Vector3(h, l, k).normalize();
+  const q = new THREE.Quaternion().setFromUnitVectors(
+    new THREE.Vector3(0, 0, 1),
+    rawNormal
+  );
+
+  // Offset from cell center along the plane normal
+  const shiftDist = offsetFraction * (span * 0.5);
+  const pos: [number, number, number] = [
+    rawNormal.x * shiftDist,
+    rawNormal.y * shiftDist,
+    rawNormal.z * shiftDist,
+  ];
+
+  // Calculate d_hkl in pm
+  let dSpacingPm: number;
+  if (system === 'Orthorhombic') {
+    const ax = latticeConstantPm * 0.85;
+    const ay = latticeConstantPm * 1.22;
+    const az = latticeConstantPm * 0.96;
+    const invD2 = (h / ax) ** 2 + (k / az) ** 2 + (l / ay) ** 2;
+    dSpacingPm = invD2 > 0 ? 1 / Math.sqrt(invD2) : latticeConstantPm;
+  } else if (system === 'HCP') {
+    const cOverA = 1.633;
+    const invD2 = ((4 / 3) * (h * h + h * k + k * k) + (l / cOverA) ** 2) / (latticeConstantPm * latticeConstantPm);
+    dSpacingPm = invD2 > 0 ? 1 / Math.sqrt(invD2) : latticeConstantPm;
+  } else {
+    const denom = Math.sqrt(h * h + k * k + l * l);
+    dSpacingPm = latticeConstantPm / denom;
+  }
+
+  const dSpacingAngstrom = dSpacingPm / 100;
+  const lambda = XRAY_SOURCES[xraySource].wavelengthAngstrom;
+  const sinTheta = lambda / (2 * dSpacingAngstrom);
+  const braggWithinEwaldSphere = sinTheta > 0 && sinTheta <= 1;
+  const braggThetaDeg = braggWithinEwaldSphere
+    ? (Math.asin(sinTheta) * 180) / Math.PI
+    : null;
+  const braggTwoThetaDeg = braggThetaDeg !== null ? braggThetaDeg * 2 : null;
+
+  const selection = evaluateXrdSelectionRule(system, h, k, l);
+
+  let color = '#ec4899';
+  if (Math.abs(h) === 1 && k === 0 && l === 0) color = '#38bdf8';
+  else if (Math.abs(h) === 1 && Math.abs(k) === 1 && l === 0) color = '#f59e0b';
+  else if (Math.abs(h) === 1 && Math.abs(k) === 1 && Math.abs(l) === 1) color = '#ec4899';
+  else if (!selection.allowed) color = '#94a3b8';
+
+  const fmtIdx = (v: number) => (v < 0 ? `${Math.abs(v)}̄` : String(v));
+
+  return {
+    active: true,
+    h,
+    k,
+    l,
+    label: `(${fmtIdx(h)}${fmtIdx(k)}${fmtIdx(l)})`,
+    normal: [rawNormal.x, rawNormal.y, rawNormal.z],
+    position: pos,
+    quaternion: [q.x, q.y, q.z, q.w],
+    planeSize: span * 1.48,
+    dSpacingPm,
+    dSpacingAngstrom,
+    braggThetaDeg,
+    braggTwoThetaDeg,
+    braggWithinEwaldSphere,
+    xrdReflectionStatus: selection.allowed ? 'Allowed' : 'Forbidden (Systematic Absence)',
+    xrdRuleNote: selection.note,
+    color,
+  };
+}
+
+export function computeSitePlaneMask(
+  sites: LatticeSite[],
+  normal: [number, number, number],
+  planeOrigin: [number, number, number],
+  tolerance: number = 0.14
+): boolean[] {
+  const [nx, ny, nz] = normal;
+  const [ox, oy, oz] = planeOrigin;
+  return sites.map((site) => {
+    const dist = Math.abs(
+      (site.pos[0] - ox) * nx +
+      (site.pos[1] - oy) * ny +
+      (site.pos[2] - oz) * nz
+    );
+    return dist <= tolerance;
+  });
+}
+

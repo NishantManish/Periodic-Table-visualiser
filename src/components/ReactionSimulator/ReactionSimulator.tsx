@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { REACTIONS_LIBRARY } from '../../data/reactionsData';
-import { Reaction } from '../../types';
+import { Reaction, PendingReactionSetup } from '../../types';
 import {
   Zap,
   Play,
@@ -89,8 +89,186 @@ const LAB_REAGENTS = [
   { formula: 'NaCl', name: 'Sodium Chloride', category: 'Salt', color: '#f8fafc' },
 ];
 
+const DIATOMIC_SYMBOL_MAP: Record<string, string> = {
+  H: 'H₂',
+  O: 'O₂',
+  N: 'N₂',
+  F: 'F₂',
+  Cl: 'Cl₂',
+  Br: 'Br₂',
+  I: 'I₂',
+};
+
+function resolveReactionFromSetup(setup: PendingReactionSetup): {
+  reaction: Reaction;
+  reagents: string[];
+  catalystLabel: string;
+  isPreset: boolean;
+} {
+  const symbols = setup.reactantSymbols.map((s) => s.trim()).filter(Boolean);
+  const key = [...symbols].sort().join('+');
+
+  if (key === 'H+N' || (symbols.includes('N₂') && symbols.includes('H₂'))) {
+    const haber = REACTIONS_LIBRARY.find((r) => r.id === 'haber-process') || REACTIONS_LIBRARY[0];
+    return {
+      reaction: haber,
+      reagents: ['N₂', 'H₂'],
+      catalystLabel: setup.catalyst ? haber.requiredConditions.catalyst || 'Iron (Fe) with K₂O promoter' : 'None',
+      isPreset: true,
+    };
+  }
+  if (key === 'H+O' || (symbols.includes('H₂') && symbols.includes('O₂'))) {
+    const water = REACTIONS_LIBRARY.find((r) => r.id === 'water-synthesis') || REACTIONS_LIBRARY[2];
+    return {
+      reaction: water,
+      reagents: ['H₂', 'O₂'],
+      catalystLabel: setup.catalyst ? water.requiredConditions.catalyst || 'Platinum wire or spark' : 'None',
+      isPreset: true,
+    };
+  }
+  if (key === 'C+H+O' || key === 'CH4+O2' || (symbols.includes('CH₄') && symbols.includes('O₂'))) {
+    const meth = REACTIONS_LIBRARY.find((r) => r.id === 'combustion-methane') || REACTIONS_LIBRARY[1];
+    return {
+      reaction: meth,
+      reagents: ['CH₄', 'O₂'],
+      catalystLabel: setup.catalyst ? meth.requiredConditions.catalyst || 'Spark / Ignition Flame' : 'None',
+      isPreset: true,
+    };
+  }
+
+  const normalizedReagents = symbols.map((s) => DIATOMIC_SYMBOL_MAP[s] || s);
+
+  const SYNTHESIS_CATALOG: Record<string, Omit<Reaction, 'requiredConditions'>> = {
+    'C+O': {
+      id: 'synthesis-co2',
+      title: 'Complete Oxidation of Carbon to CO₂',
+      reactants: ['C', 'O₂'],
+      products: ['CO₂'],
+      balancedEquation: 'C(s) + O₂(g) → CO₂(g)',
+      energyChange: '-393.5 kJ/mol (Exothermic)',
+      activationEnergy: 145,
+      deltaH: -393.5,
+      entropyChange: 2.9,
+      reactionType: 'Combustion',
+      equilibriumType: 'Irreversible',
+      phaseState: 'Gas Phase',
+      description: 'Direct oxidation of elemental carbon in excess oxygen gas yielding linear carbon dioxide.',
+      industrialApplication: 'Thermal power generation, metallurgical smelting, and industrial CO₂ capture feedstocks.',
+      safetyNotes: ['High-temperature oxidation hazard', 'Ensure adequate ventilation to prevent CO buildup'],
+      stepsExplanation: [
+        { step: 1, title: 'Thermal Surface Activation', detail: 'O₂ adsorbs onto hot carbon lattice sites above 700 °C.' },
+        { step: 2, title: 'O=O Bond Cleavage', detail: 'Chemisorbed oxygen dissociates into reactive surface oxygen atoms.' },
+        { step: 3, title: 'Double-Bond Formation', detail: 'Two sp-hybridized C=O double bonds form in linear O=C=O.' },
+        { step: 4, title: 'Gas Desorption', detail: 'Carbon dioxide desorbs releasing 393.5 kJ/mol exothermic enthalpy.' },
+      ],
+    },
+    'Cl+Na': {
+      id: 'synthesis-nacl',
+      title: 'Ionic Lattice Synthesis of Sodium Chloride',
+      reactants: ['Na', 'Cl₂'],
+      products: ['NaCl'],
+      balancedEquation: '2Na(s) + Cl₂(g) → 2NaCl(s)',
+      energyChange: '-822.4 kJ/mol (Highly Exothermic)',
+      activationEnergy: 42,
+      deltaH: -822.4,
+      entropyChange: -181,
+      reactionType: 'Synthesis',
+      equilibriumType: 'Irreversible',
+      phaseState: 'Heterogeneous / Solid-Liquid',
+      description: 'Vigorous electron-transfer redox synthesis between alkali sodium metal and chlorine gas forming a face-centered cubic ionic crystal.',
+      industrialApplication: 'Halide salt purification and demonstration of Born-Haber ionic lattice stabilization (-787 kJ/mol).',
+      safetyNotes: ['Chlorine gas is toxic and corrosive', 'Molten sodium ignites vigorously in chlorine vapor'],
+      stepsExplanation: [
+        { step: 1, title: '3s¹ Valence Ionization', detail: 'Sodium donates its 3s¹ electron (IE₁ = 496 kJ/mol) to chlorine.' },
+        { step: 2, title: 'Halogen Electron Capture', detail: 'Chlorine atoms accept electrons (EA = -349 kJ/mol) forming Cl⁻ anions.' },
+        { step: 3, title: 'Electrostatic Ion Pairing', detail: 'Oppositely charged Na⁺ and Cl⁻ ions attract strongly via Coulombic forces.' },
+        { step: 4, title: 'Rock-Salt Cubic Nucleation', detail: 'Ions pack into an FCC NaCl crystal lattice with 6:6 octahedral coordination.' },
+      ],
+    },
+    'O+S': {
+      id: 'synthesis-so2',
+      title: 'Combustion of Elemental Sulfur to Sulfur Dioxide',
+      reactants: ['S', 'O₂'],
+      products: ['SO₂'],
+      balancedEquation: 'S(s) + O₂(g) → SO₂(g)',
+      energyChange: '-296.8 kJ/mol (Exothermic)',
+      activationEnergy: 95,
+      deltaH: -296.8,
+      entropyChange: 11.4,
+      reactionType: 'Synthesis',
+      equilibriumType: 'Irreversible',
+      phaseState: 'Gas Phase',
+      description: 'Primary first step of the industrial Contact Process, oxidizing molten sulfur into bent sp² sulfur dioxide.',
+      industrialApplication: 'First stage of global Sulfuric Acid (H₂SO₄) manufacturing and food/wine sulfite preservation.',
+      safetyNotes: ['SO₂ is a sharp respiratory irritant', 'Avoid moisture contact which generates sulfurous acid'],
+      stepsExplanation: [
+        { step: 1, title: 'S₈ Ring Cleavage', detail: 'Thermal energy breaks puckered S₈ rings into reactive sulfur chains.' },
+        { step: 2, title: 'Oxygen Radical Addition', detail: 'Triplet O₂ reacts with sulfur atoms forming transient SO intermediates.' },
+        { step: 3, title: 'Resonance Stabilization', detail: 'Bent SO₂ (119.5°) forms delocalized pπ–pπ/dπ bonds.' },
+        { step: 4, title: 'Exothermic Gas Release', detail: 'Product gas exits furnace at ~1000 °C ready for V₂O₅ catalytic oxidation.' },
+      ],
+    },
+  };
+
+  const presetAlt = SYNTHESIS_CATALOG[key];
+  if (presetAlt) {
+    return {
+      reaction: {
+        ...presetAlt,
+        requiredConditions: {
+          temp: setup.temperature,
+          pressure: setup.pressure,
+          catalyst: setup.catalyst ? 'Heterogeneous Surface Catalyst' : undefined,
+        },
+      },
+      reagents: presetAlt.reactants,
+      catalystLabel: setup.catalyst ? 'Heterogeneous Surface Catalyst' : 'None',
+      isPreset: false,
+    };
+  }
+
+  const productFormula = setup.moleculeFormula || symbols.join('');
+  const productName = setup.moleculeName || productFormula;
+  const displayReagents = normalizedReagents.length > 0 ? normalizedReagents : ['H₂', 'O₂'];
+  const customReaction: Reaction = {
+    id: `synthesis-${setup.moleculeId || Date.now()}`,
+    title: `Direct Synthesis of ${productName} (${productFormula})`,
+    reactants: displayReagents,
+    products: [productFormula],
+    balancedEquation: `${displayReagents.join(' + ')} → ${productFormula}`,
+    energyChange: '-148.0 kJ/mol (Exothermic)',
+    activationEnergy: 110,
+    deltaH: -148.0,
+    entropyChange: -75,
+    reactionType: 'Synthesis',
+    equilibriumType: 'Reversible',
+    phaseState: setup.pressure > 5 ? 'Gas Phase' : 'Heterogeneous / Solid-Liquid',
+    description: `Synthesized pathway for ${productName} (${productFormula}) launched directly from the 3D Molecular Dossier at ${setup.temperature} °C and ${setup.pressure} atm.`,
+    industrialApplication: `Targeted synthesis and kinetic analysis for ${productName}.`,
+    safetyNotes: ['Review GHS chemical dossier and pressure vessel ratings prior to bench execution.'],
+    stepsExplanation: [
+      { step: 1, title: 'Reagent Mixing & Heating', detail: `Reactants (${displayReagents.join(', ')}) thermalize to ${setup.temperature} °C.` },
+      { step: 2, title: 'Activated Complex [‡]', detail: `High-energy collisions overcome the activation barrier${setup.catalyst ? ' aided by surface catalysis' : ''}.` },
+      { step: 3, title: 'Bond Reorganization', detail: `New covalent/ionic bonds form yielding ${productFormula}.` },
+      { step: 4, title: 'Equilibrium Stabilization', detail: `System approaches thermodynamic equilibrium at ${setup.pressure} atm.` },
+    ],
+    requiredConditions: {
+      temp: setup.temperature,
+      pressure: setup.pressure,
+      catalyst: setup.catalyst ? 'Industrial Heterogeneous Catalyst' : undefined,
+    },
+  };
+
+  return {
+    reaction: customReaction,
+    reagents: displayReagents,
+    catalystLabel: setup.catalyst ? 'Industrial Heterogeneous Catalyst' : 'None',
+    isPreset: false,
+  };
+}
+
 export const ReactionSimulator: React.FC = () => {
-  const { unlockAchievement } = useAppStore();
+  const { unlockAchievement, pendingReactionSetup, setPendingReactionSetup } = useAppStore();
 
   const [activeTab, setActiveTab] = useState<'presets' | 'workbench' | 'ai'>('presets');
   const [selectedReaction, setSelectedReaction] = useState<Reaction>(REACTIONS_LIBRARY[0]);
@@ -258,6 +436,26 @@ export const ReactionSimulator: React.FC = () => {
   useEffect(() => {
     initChamberParticles(selectedReaction, selectedReaction.requiredConditions.temp, selectedReaction.requiredConditions.pressure);
   }, [selectedReaction, initChamberParticles]);
+
+  // Handle cross-lab deep-linking from MoleculeVisualizer ("Simulate in Reaction Chamber")
+  useEffect(() => {
+    if (!pendingReactionSetup) return;
+    const { reaction, reagents, catalystLabel, isPreset } = resolveReactionFromSetup(pendingReactionSetup);
+    if (simulationTimerRef.current) clearInterval(simulationTimerRef.current);
+    setIsSimulating(false);
+    setSimulationProgress(0);
+    setActiveStepIndex(0);
+    setScrubCoordinate(0);
+    setMixedReagents(reagents);
+    setSelectedReaction(reaction);
+    setTemperature(pendingReactionSetup.temperature);
+    setPressure(pendingReactionSetup.pressure);
+    setHasCatalyst(pendingReactionSetup.catalyst);
+    setCatalyst(catalystLabel);
+    setActiveTab(isPreset ? 'presets' : 'workbench');
+    initChamberParticles(reaction, pendingReactionSetup.temperature, pendingReactionSetup.pressure);
+    setPendingReactionSetup(null);
+  }, [pendingReactionSetup, initChamberParticles, setPendingReactionSetup]);
 
   // Smoothly rescale particle thermal speeds when user drags the Temperature slider
   useEffect(() => {

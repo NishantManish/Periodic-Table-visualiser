@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { useAppStore } from '../../store/useAppStore';
 import { AtomCanvas, AtomCanvasRef, QuantumOrbitalType, QuantumCloudMode } from './AtomCanvas';
-import { CrystalLattice3D } from './CrystalLattice3D';
+import { CrystalLatticeView } from './CrystalLatticeView';
 import { ELEMENTS, CATEGORY_LABELS } from '../../data/elementsData';
 import {
   Play,
@@ -118,7 +118,7 @@ const SHELL_NAMES = ['K (n=1)', 'L (n=2)', 'M (n=3)', 'N (n=4)', 'O (n=5)', 'P (
 type RenderStyle = 'realistic' | 'neon' | 'wireframe' | 'xray' | 'bohr';
 
 export const AtomViewer3D: React.FC = () => {
-  const { selectedElement } = useAppStore();
+  const { selectedElement, atom3DTab, setAtom3DTab } = useAppStore();
   const [localElement, setLocalElement] = useState(selectedElement || ELEMENTS[0]);
   const currentElement = localElement;
 
@@ -144,6 +144,33 @@ export const AtomViewer3D: React.FC = () => {
   const [quantumCloudMode, setQuantumCloudMode] = useState<QuantumCloudMode>('harmonics-lobes');
   const [showNodalPlanes, setShowNodalPlanes] = useState<boolean>(false);
   const [renderStyle, setRenderStyle] = useState<RenderStyle>('realistic');
+
+  // Synchronize external deep-link atom3DTab -> AtomViewer3D sub-view & orbital mode
+  useEffect(() => {
+    const activeEl = selectedElement || localElement;
+    if (atom3DTab === 'crystal') {
+      setActiveMode('crystal-lattice');
+    } else if (atom3DTab === 'orbitals') {
+      setActiveMode('3d-atom');
+      const blockOrbital: QuantumOrbitalType =
+        activeEl.block === 'p'
+          ? 'p'
+          : activeEl.block === 'd'
+            ? 'd'
+            : activeEl.block === 'f'
+              ? 'f'
+              : 's';
+      setOrbitalType(blockOrbital);
+      setQuantumCloudMode('harmonics-lobes');
+    } else if (atom3DTab === 'quantum-numbers') {
+      setActiveMode('aufbau-filling');
+    } else if (atom3DTab === 'energy') {
+      setActiveMode('bohr-quantum');
+    } else if (atom3DTab === 'bohr') {
+      setActiveMode('3d-atom');
+      setOrbitalType('bohr');
+    }
+  }, [atom3DTab, selectedElement]);
 
   // View & Label Controls
   const [showLabels, setShowLabels] = useState(true);
@@ -317,7 +344,16 @@ export const AtomViewer3D: React.FC = () => {
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveMode(tab.id as any)}
+              onClick={() => {
+                const nextMode = tab.id as typeof activeMode;
+                setActiveMode(nextMode);
+                if (nextMode === 'crystal-lattice') setAtom3DTab('crystal');
+                else if (nextMode === 'aufbau-filling') setAtom3DTab('quantum-numbers');
+                else if (nextMode === 'bohr-quantum') setAtom3DTab('energy');
+                else if (nextMode === '3d-atom') {
+                  setAtom3DTab(orbitalType === 'bohr' ? 'bohr' : 'orbitals');
+                }
+              }}
               className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
                 activeMode === tab.id
                   ? 'bg-cyan-500 text-slate-950 shadow-sm'
@@ -1060,7 +1096,7 @@ export const AtomViewer3D: React.FC = () => {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
         >
-          <CrystalLattice3D element={currentElement} />
+          <CrystalLatticeView element={currentElement} />
         </motion.div>
       )}
     </div>

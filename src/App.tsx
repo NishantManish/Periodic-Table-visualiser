@@ -12,7 +12,6 @@ const MoleculeVisualizer = lazy(() => import('@/components/MoleculeVisualizer/Mo
 const ReactionSimulator = lazy(() => import('@/components/ReactionSimulator/ReactionSimulator').then(m => ({ default: m.ReactionSimulator })));
 const PeriodicTrends = lazy(() => import('@/components/PeriodicTrends/PeriodicTrends').then(m => ({ default: m.PeriodicTrends })));
 const LearningDashboard = lazy(() => import('@/components/LearningDashboard/LearningDashboard').then(m => ({ default: m.LearningDashboard })));
-const QuizMode = lazy(() => import('@/components/QuizMode/QuizMode').then(m => ({ default: m.QuizMode })));
 const AiTutorView = lazy(() => import('@/components/AiTutor/AiTutorView').then(m => ({ default: m.AiTutorView })));
 const ElementDetailModal = lazy(() => import('@/components/ElementModal/ElementDetailModal').then(m => ({ default: m.ElementDetailModal })));
 
@@ -43,7 +42,7 @@ const SuspenseLoader = () => (
 );
 
 export default function App() {
-  const { viewMode, selectedElement, theme, highContrast } = useAppStore();
+  const { viewMode, selectedElement, isElementModalOpen, theme, highContrast } = useAppStore();
 
   return (
     <QueryProvider>
@@ -74,7 +73,6 @@ export default function App() {
                     {viewMode === 'reaction-simulator' && <ReactionSimulator />}
                     {viewMode === 'trends' && <PeriodicTrends />}
                     {viewMode === 'learning' && <LearningDashboard />}
-                    {viewMode === 'quiz' && <QuizMode />}
                     {viewMode === 'ai-tutor' && <AiTutorView />}
                   </Suspense>
                 </ErrorBoundary>
@@ -83,7 +81,7 @@ export default function App() {
 
             {/* Element Inspector Modal */}
             <Suspense fallback={null}>
-              {selectedElement && <ElementDetailModal />}
+              {selectedElement && isElementModalOpen && <ElementDetailModal />}
             </Suspense>
           </div>
         </ToastProvider>

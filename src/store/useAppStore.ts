@@ -9,19 +9,14 @@ import {
   GradeLevel,
   ViewMode,
   Achievement,
+  Atom3DTab,
+  PendingReactionSetup,
 } from '../types';
 import { ELEMENTS } from '../data/elementsData';
-import { playSound } from '../utils/audio';
 
 const INITIAL_ACHIEVEMENTS: Achievement[] = [
   { id: 'first_element', title: 'Element Explorer', description: 'Inspect your first element in detail.', icon: '🔬', unlocked: false },
-  { id: 'quiz_master', title: 'Chemistry Scholar', description: 'Complete a quiz with a score of 80% or higher.', icon: '🎓', unlocked: false },
-  { id: 'flashcard_master', title: 'Flashcard Pro', description: 'Master 10 element flashcards.', icon: '🃏', unlocked: false },
-  { id: 'element_detective', title: 'Element Detective', description: 'Guess a mystery element in Guess The Element mode.', icon: '🕵️‍♂️', unlocked: false },
-  { id: 'electron_master', title: 'Orbital Architect', description: 'Master electron configuration challenges.', icon: '⚛️', unlocked: false },
-  { id: 'reaction_master', title: 'Reaction Predictor', description: 'Predict chemical reactions correctly.', icon: '🧪', unlocked: false },
-  { id: 'speed_demon', title: 'Blitz Chemist', description: 'Score 5+ correct answers in Timed Blitz Mode.', icon: '⚡', unlocked: false },
-  { id: 'molecule_creator', title: 'Molecular Architect', description: 'Build or inspect a 3D molecule.', icon: '🧪', unlocked: false },
+  { id: 'molecule_creator', title: 'Molecular Architect', description: 'Inspect or analyze a 3D molecule.', icon: '🧪', unlocked: false },
   { id: 'reaction_sim', title: 'Lab Chemist', description: 'Simulate a chemical reaction.', icon: '💥', unlocked: false },
   { id: 'ai_convo', title: 'AI Student', description: 'Ask the AI tutor a question.', icon: '🤖', unlocked: false },
   { id: 'streak_3', title: 'Dedicated Learner', description: 'Maintain a 3-day learning streak.', icon: '🔥', unlocked: false },
@@ -32,9 +27,22 @@ interface AppState {
   viewMode: ViewMode;
   setViewMode: (mode: ViewMode) => void;
 
-  // Selected Element
+  // Selected Element & Modal Visibility
   selectedElement: ElementData | null;
+  isElementModalOpen: boolean;
   setSelectedElement: (element: ElementData | null) => void;
+
+  // Cross-Laboratory Deep-Linking State
+  activeMoleculeId: string | null;
+  setActiveMoleculeId: (id: string | null) => void;
+  atom3DTab: Atom3DTab;
+  setAtom3DTab: (tab: Atom3DTab) => void;
+  pendingReactionSetup: PendingReactionSetup | null;
+  setPendingReactionSetup: (setup: PendingReactionSetup | null) => void;
+
+  openElementInAtom3D: (element: ElementData, tab?: Atom3DTab) => void;
+  openMoleculeInVisualizer: (moleculeId: string) => void;
+  launchReactionSimulation: (setup: PendingReactionSetup) => void;
 
   // Search & Filters
   searchQuery: string;
@@ -70,17 +78,25 @@ interface AppState {
   streak: number;
   lastStudyDate: string;
   bookmarks: number[]; // atomic numbers
-  masteredFlashcards: number[]; // atomic numbers
-  reviewFlashcards: number[]; // atomic numbers
   notes: Record<number, string>; // atomic number -> note text
+  masteredFlashcards: string[];
   achievements: Achievement[];
-  
+
   addXp: (amount: number) => void;
   toggleBookmark: (atomicNumber: number) => void;
-  markFlashcardMastered: (atomicNumber: number) => void;
-  markFlashcardReview: (atomicNumber: number) => void;
   saveNote: (atomicNumber: number, note: string) => void;
   unlockAchievement: (id: string) => void;
+  importProgressBackup: (backup: {
+    xp?: number;
+    level?: number;
+    streak?: number;
+    lastStudyDate?: string;
+    bookmarks?: number[];
+    notes?: Record<number, string>;
+    achievements?: Achievement[];
+    gradeLevel?: GradeLevel;
+    masteredFlashcards?: string[];
+  }) => void;
 
   // Settings & Accessibility
   soundEnabled: boolean;
@@ -106,17 +122,67 @@ export const useAppStore = create<AppState>()(
       // Default view
       viewMode: 'table',
       setViewMode: (mode) => {
-        const normalized = mode === 'molecule-builder' ? 'molecule-visualizer' : mode;
+        const raw = mode as string;
+        const normalized: ViewMode =
+          raw === 'molecule-builder'
+            ? 'molecule-visualizer'
+            : raw === 'atom-3d'
+              ? '3d-atom'
+              : raw === 'reactions'
+                ? 'reaction-simulator'
+                : raw === 'quiz'
+                  ? 'table'
+                  : mode;
         set({ viewMode: normalized });
       },
 
-      // Element
+      // Element & Modal
       selectedElement: null,
+      isElementModalOpen: false,
       setSelectedElement: (element) => {
         if (element) {
           get().unlockAchievement('first_element');
         }
-        set({ selectedElement: element });
+        set({ selectedElement: element, isElementModalOpen: element !== null });
+      },
+
+      // Cross-Laboratory Deep-Linking
+      activeMoleculeId: null,
+      setActiveMoleculeId: (id) => set({ activeMoleculeId: id }),
+
+      atom3DTab: 'bohr',
+      setAtom3DTab: (tab) => set({ atom3DTab: tab }),
+
+      pendingReactionSetup: null,
+      setPendingReactionSetup: (setup) => set({ pendingReactionSetup: setup }),
+
+      openElementInAtom3D: (element, tab = 'bohr') => {
+        get().unlockAchievement('first_element');
+        set({
+          selectedElement: element,
+          isElementModalOpen: false,
+          atom3DTab: tab,
+          viewMode: '3d-atom',
+        });
+      },
+
+      openMoleculeInVisualizer: (moleculeId) => {
+        get().unlockAchievement('molecule_creator');
+        set({
+          activeMoleculeId: moleculeId,
+          selectedElement: null,
+          isElementModalOpen: false,
+          viewMode: 'molecule-visualizer',
+        });
+      },
+
+      launchReactionSimulation: (setup) => {
+        get().unlockAchievement('reaction_sim');
+        set({
+          pendingReactionSetup: setup,
+          isElementModalOpen: false,
+          viewMode: 'reaction-simulator',
+        });
       },
 
       // Filters
@@ -163,12 +229,11 @@ export const useAppStore = create<AppState>()(
       streak: 1,
       lastStudyDate: new Date().toISOString().slice(0, 10),
       bookmarks: [1, 6, 8, 79], // H, C, O, Au bookmarked by default
-      masteredFlashcards: [],
-      reviewFlashcards: [],
       notes: {
         1: 'Hydrogen is the fuel of the stars! Stars fuse 4 H atoms into 1 He atom.',
         6: 'Carbon has 4 valence electrons allowing complex 3D organic scaffolds.',
       },
+      masteredFlashcards: [],
       achievements: INITIAL_ACHIEVEMENTS,
 
       addXp: (amount) => {
@@ -196,30 +261,6 @@ export const useAppStore = create<AppState>()(
         }
       },
 
-      markFlashcardMastered: (atomicNumber) => {
-        const currentMastered = get().masteredFlashcards;
-        const currentReview = get().reviewFlashcards.filter((id) => id !== atomicNumber);
-        if (!currentMastered.includes(atomicNumber)) {
-          const nextMastered = [...currentMastered, atomicNumber];
-          set({ masteredFlashcards: nextMastered, reviewFlashcards: currentReview });
-          get().addXp(15);
-          if (nextMastered.length >= 10) {
-            get().unlockAchievement('flashcard_master');
-          }
-        } else {
-          set({ reviewFlashcards: currentReview });
-        }
-      },
-
-      markFlashcardReview: (atomicNumber) => {
-        const currentMastered = get().masteredFlashcards.filter((id) => id !== atomicNumber);
-        const currentReview = get().reviewFlashcards;
-        const nextReview = currentReview.includes(atomicNumber)
-          ? currentReview
-          : [...currentReview, atomicNumber];
-        set({ masteredFlashcards: currentMastered, reviewFlashcards: nextReview });
-      },
-
       saveNote: (atomicNumber, note) => {
         set({
           notes: {
@@ -239,6 +280,46 @@ export const useAppStore = create<AppState>()(
             ),
           });
         }
+      },
+
+      importProgressBackup: (backup) => {
+        const validBookmarks = Array.isArray(backup.bookmarks)
+          ? backup.bookmarks.filter((n) => typeof n === 'number' && n >= 1 && n <= 118)
+          : get().bookmarks;
+        const validNotes: Record<number, string> = {};
+        if (backup.notes && typeof backup.notes === 'object') {
+          Object.entries(backup.notes).forEach(([k, v]) => {
+            const z = Number(k);
+            if (Number.isInteger(z) && z >= 1 && z <= 118 && typeof v === 'string') {
+              validNotes[z] = v;
+            }
+          });
+        } else {
+          Object.assign(validNotes, get().notes);
+        }
+
+        const importedAchievements = Array.isArray(backup.achievements) ? backup.achievements : [];
+        const reconciledAchievements = INITIAL_ACHIEVEMENTS.map((base) => {
+          const match = importedAchievements.find((a) => a.id === base.id);
+          return match ? { ...base, unlocked: Boolean(match.unlocked), unlockedAt: match.unlockedAt } : base;
+        });
+
+        const nextXp = typeof backup.xp === 'number' && backup.xp >= 0 ? Math.floor(backup.xp) : get().xp;
+        const nextLevel = Math.floor(nextXp / 200) + 1;
+
+        set({
+          xp: nextXp,
+          level: typeof backup.level === 'number' && backup.level >= 1 ? backup.level : nextLevel,
+          streak: typeof backup.streak === 'number' && backup.streak >= 0 ? backup.streak : get().streak,
+          lastStudyDate: typeof backup.lastStudyDate === 'string' ? backup.lastStudyDate : get().lastStudyDate,
+          bookmarks: validBookmarks,
+          notes: validNotes,
+          masteredFlashcards: Array.isArray(backup.masteredFlashcards)
+            ? backup.masteredFlashcards.filter((s) => typeof s === 'string')
+            : get().masteredFlashcards,
+          achievements: reconciledAchievements,
+          gradeLevel: backup.gradeLevel || get().gradeLevel,
+        });
       },
 
       // Settings
@@ -272,9 +353,8 @@ export const useAppStore = create<AppState>()(
         streak: state.streak,
         lastStudyDate: state.lastStudyDate,
         bookmarks: state.bookmarks,
-        masteredFlashcards: state.masteredFlashcards,
-        reviewFlashcards: state.reviewFlashcards,
         notes: state.notes,
+        masteredFlashcards: state.masteredFlashcards,
         achievements: state.achievements,
         gradeLevel: state.gradeLevel,
         soundEnabled: state.soundEnabled,
@@ -283,6 +363,21 @@ export const useAppStore = create<AppState>()(
         reducedMotion: state.reducedMotion,
         fontSizeScale: state.fontSizeScale,
       }),
+      merge: (persistedState, currentState) => {
+        const persisted = (persistedState as Partial<AppState> | undefined) ?? {};
+        const persistedAchievements = Array.isArray(persisted.achievements)
+          ? persisted.achievements
+          : [];
+        const reconciledAchievements = INITIAL_ACHIEVEMENTS.map((base) => {
+          const existing = persistedAchievements.find((a) => a.id === base.id);
+          return existing ? { ...base, unlocked: existing.unlocked, unlockedAt: existing.unlockedAt } : base;
+        });
+        return {
+          ...currentState,
+          ...persisted,
+          achievements: reconciledAchievements,
+        };
+      },
     }
   )
 );

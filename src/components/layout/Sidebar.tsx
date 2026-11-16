@@ -8,7 +8,6 @@ import {
   Flame,
   TrendingUp,
   BookOpen,
-  Award,
   Bot,
 } from 'lucide-react';
 
@@ -27,7 +26,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
     { id: 'reaction-simulator', label: 'Reaction Simulator', icon: <Flame className="w-4 h-4" /> },
     { id: 'trends', label: 'Periodic Trends', icon: <TrendingUp className="w-4 h-4" /> },
     { id: 'learning', label: 'Learning & Progress', icon: <BookOpen className="w-4 h-4" /> },
-    { id: 'quiz', label: 'Quiz & Practice Mode', icon: <Award className="w-4 h-4" /> },
     { id: 'ai-tutor', label: 'AI Chemistry Tutor', icon: <Bot className="w-4 h-4" /> },
   ];
 

@@ -243,15 +243,6 @@ export interface Reaction {
   colorTheme?: { reactant1: string; reactant2: string; product: string };
 }
 
-export interface QuizQuestion {
-  id: string;
-  question: string;
-  options: string[];
-  correctIndex: number;
-  explanation: string;
-  category: string;
-}
-
 export interface Achievement {
   id: string;
   title: string;
@@ -275,5 +266,17 @@ export type ViewMode =
   | 'reaction-simulator'
   | 'trends'
   | 'learning'
-  | 'quiz'
   | 'ai-tutor';
+
+export type Atom3DTab = 'bohr' | 'orbitals' | 'quantum-numbers' | 'energy' | 'crystal';
+
+export interface PendingReactionSetup {
+  reactantSymbols: string[];
+  temperature: number;
+  pressure: number;
+  catalyst: boolean;
+  moleculeId?: string;
+  moleculeName?: string;
+  moleculeFormula?: string;
+}
+

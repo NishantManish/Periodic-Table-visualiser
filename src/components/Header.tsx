@@ -10,7 +10,6 @@ import {
   Sun,
   Moon,
   Bookmark,
-  Award,
   Settings,
   Flame,
   Layers,
@@ -76,7 +75,6 @@ export const Header: React.FC = () => {
     { mode: 'reaction-simulator', label: 'Reactions', icon: <Zap className="w-4 h-4" /> },
     { mode: 'trends', label: 'Trends', icon: <TrendingUp className="w-4 h-4" /> },
     { mode: 'learning', label: 'Learning', icon: <GraduationCap className="w-4 h-4" /> },
-    { mode: 'quiz', label: 'Quiz & Flashcards', icon: <Award className="w-4 h-4" /> },
     { mode: 'ai-tutor', label: 'AI Tutor', icon: <Sparkles className="w-4 h-4 text-sky-500 dark:text-cyan-400" /> },
   ];
 
@@ -432,7 +430,7 @@ export const Header: React.FC = () => {
                       Sound Effects
                     </p>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Web Audio synthesizer cues for quizzes & cards
+                      Web Audio synthesizer cues for interactions & AI Tutor
                     </p>
                   </div>
                   <button
