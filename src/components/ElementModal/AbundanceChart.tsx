@@ -18,6 +18,20 @@ interface IsotopeData {
   note?: string;
 }
 
+// Precomputed stable band points directly from VERIFIED_ISOTOPE_TABLE (Z=1..83)
+const STABLE_BAND_POINTS: Array<{ z: number; n: number }> = (() => {
+  const pts: Array<{ z: number; n: number }> = [];
+  Object.entries(VERIFIED_ISOTOPE_TABLE).forEach(([zStr, list]) => {
+    const zVal = Number(zStr);
+    if (zVal <= 83) {
+      list.forEach(([massNum]) => {
+        pts.push({ z: zVal, n: Math.max(0, massNum - zVal) });
+      });
+    }
+  });
+  return pts;
+})();
+
 function getVerifiedIsotopes(element: ElementData): IsotopeData[] {
   const realEntries = VERIFIED_ISOTOPE_TABLE[element.atomicNumber];
   const decayMeta = RADIOISOTOPE_DECAY_DATA[element.atomicNumber];
@@ -164,23 +178,23 @@ export const AbundanceChart: React.FC<{ element: ElementData }> = ({ element }) 
   }, [element, theme]);
 
   return (
-    <div className="space-y-3 bg-slate-900/60 p-4 rounded-2xl border border-slate-800 shadow-lg">
+    <div className="space-y-3 bg-slate-50 dark:bg-slate-900/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-lg">
       {/* Legend Header */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs">
-        <span className="text-slate-400 font-semibold">Isotope Distribution Legend:</span>
+        <span className="text-slate-600 dark:text-slate-400 font-semibold">Isotope Distribution Legend:</span>
         <div className="flex flex-wrap items-center gap-3">
           {isotopes.map((iso) => (
-            <div key={iso.isotope} className="flex items-center gap-1.5 bg-slate-950/80 px-2.5 py-1 rounded-lg border border-slate-800">
+            <div key={iso.isotope} className="flex items-center gap-1.5 bg-white dark:bg-slate-950/80 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-800">
               <div className="w-3 h-3 rounded-md shadow-sm" style={{ backgroundColor: iso.color }} />
-              <span className="font-mono font-bold text-slate-200">{iso.isotope}</span>
-              <span className="font-mono text-cyan-400">({iso.abundance}%)</span>
+              <span className="font-mono font-bold text-slate-900 dark:text-slate-200">{iso.isotope}</span>
+              <span className="font-mono text-sky-700 dark:text-cyan-400">({iso.abundance}%)</span>
             </div>
           ))}
         </div>
       </div>
 
       {/* Horizontally Scrollable Chart Container */}
-      <div ref={containerRef} className="relative w-full overflow-x-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-900 rounded-xl bg-slate-950/90 p-2 border border-slate-800/80 flex justify-start sm:justify-center">
+      <div ref={containerRef} className="relative w-full overflow-x-auto scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700 scrollbar-track-slate-100 dark:scrollbar-track-slate-900 rounded-xl bg-white dark:bg-slate-950/90 p-2 border border-slate-200 dark:border-slate-800/80 flex justify-start sm:justify-center">
         <svg ref={svgRef} className="shrink-0 min-w-[360px]"></svg>
 
         {/* Hover Tooltip Overlay */}
@@ -200,24 +214,252 @@ export const AbundanceChart: React.FC<{ element: ElementData }> = ({ element }) 
 
       {/* NuDat Radioisotope Half-Life & Primary Decay Mode Badges */}
       {decayMeta && (
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-[11px]">
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200 dark:border-slate-800/80 text-[11px]">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="px-2.5 py-1 rounded-lg bg-rose-950/60 text-rose-300 border border-rose-500/30 font-mono font-bold">
+            <span className="px-2.5 py-1 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-500/30 font-mono font-bold">
               Nuclide: {element.symbol}-{decayMeta.mass}
             </span>
-            <span className="px-2.5 py-1 rounded-lg bg-amber-950/60 text-amber-300 border border-amber-500/30 font-mono font-bold">
+            <span className="px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-500/30 font-mono font-bold">
               Half-Life (t₁/₂): {decayMeta.halfLife}
             </span>
-            <span className="px-2.5 py-1 rounded-lg bg-purple-950/60 text-purple-300 border border-purple-500/30 font-mono font-bold">
+            <span className="px-2.5 py-1 rounded-lg bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-500/30 font-mono font-bold">
               Decay Mode: {decayMeta.decayMode}
             </span>
           </div>
           {decayMeta.note && (
-            <span className="text-slate-400 italic text-[11px]">{decayMeta.note}</span>
+            <span className="text-slate-600 dark:text-slate-400 italic text-[11px]">{decayMeta.note}</span>
           )}
         </div>
       )}
+
+      {/* Nuclear Valley of Stability (N vs. Z) Cross-Link Plot */}
+      <ValleyOfStabilityPlot
+        element={element}
+        isotopes={isotopes}
+        isExclusivelyRadioactive={isExclusivelyRadioactive}
+        isLight={theme === 'light'}
+      />
     </div>
   );
 };
+
+interface ValleyOfStabilityPlotProps {
+  element: ElementData;
+  isotopes: IsotopeData[];
+  isExclusivelyRadioactive: boolean;
+  isLight: boolean;
+}
+
+const ValleyOfStabilityPlot: React.FC<ValleyOfStabilityPlotProps> = ({
+  element,
+  isotopes,
+  isExclusivelyRadioactive,
+  isLight,
+}) => {
+  const Z = element.atomicNumber;
+  const parsedMasses = isotopes.map((iso) => {
+    const parts = iso.isotope.split('-');
+    const A = parseInt(parts[parts.length - 1], 10) || Math.round(element.atomicMass);
+    const N = Math.max(0, A - Z);
+    return { label: iso.isotope, A, N, ratio: Z > 0 ? N / Z : 0, color: iso.color, abundance: iso.abundance };
+  });
+
+  const primaryIso = parsedMasses.reduce(
+    (best, cur) => (cur.abundance > best.abundance ? cur : best),
+    parsedMasses[0]
+  );
+
+  const W = 420;
+  const H = 185;
+  const padL = 42;
+  const padR = 16;
+  const padT = 14;
+  const padB = 30;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const maxZ = 120;
+  const maxN = 180;
+
+  const toX = (zVal: number) => padL + (zVal / maxZ) * plotW;
+  const toY = (nVal: number) => padT + plotH - (nVal / maxN) * plotH;
+
+  const gridStroke = isLight ? '#e2e8f0' : '#1e293b';
+  const tickFill = isLight ? '#475569' : '#94a3b8';
+  const titleFill = isLight ? '#0f172a' : '#cbd5e1';
+  const limitFill = isLight ? '#be123c' : '#fda4af';
+
+  return (
+    <div className="pt-3 border-t border-slate-200 dark:border-slate-800/80 space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div>
+          <span className="font-bold text-slate-900 dark:text-slate-200 block">
+            Nuclear Valley of Stability (Neutrons N vs. Protons Z)
+          </span>
+          <span className="text-[11px] text-slate-600 dark:text-slate-400">
+            NuDat / CIAAW verified nuclides • Heavy nuclei require N/Z &gt; 1 to offset proton Coulomb repulsion
+          </span>
+        </div>
+        {primaryIso && (
+          <div className="flex items-center gap-2 font-mono text-[11px] tabular-nums">
+            <span className="px-2 py-0.5 rounded bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sky-700 dark:text-cyan-300 font-bold">
+              Z = {Z}, N = {primaryIso.N}
+            </span>
+            <span
+              className={`px-2 py-0.5 rounded border font-bold ${
+                isExclusivelyRadioactive
+                  ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-500/40 text-rose-700 dark:text-rose-300'
+                  : 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-500/40 text-emerald-700 dark:text-emerald-300'
+              }`}
+            >
+              N/Z = {primaryIso.ratio.toFixed(2)}
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl bg-white dark:bg-slate-950/90 border border-slate-200 dark:border-slate-800/80 p-2 overflow-x-auto">
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto min-w-[340px]">
+          {/* Grid Lines */}
+          {[0, 30, 60, 90, 120].map((zTick) => (
+            <g key={`zg-${zTick}`}>
+              <line
+                x1={toX(zTick)}
+                y1={padT}
+                x2={toX(zTick)}
+                y2={padT + plotH}
+                stroke={gridStroke}
+                strokeDasharray="2 3"
+              />
+              <text
+                x={toX(zTick)}
+                y={H - 12}
+                textAnchor="middle"
+                fill={tickFill}
+                fontSize="9"
+                fontFamily="monospace"
+              >
+                {zTick}
+              </text>
+            </g>
+          ))}
+          {[0, 45, 90, 135, 180].map((nTick) => (
+            <g key={`ng-${nTick}`}>
+              <line
+                x1={padL}
+                y1={toY(nTick)}
+                x2={padL + plotW}
+                y2={toY(nTick)}
+                stroke={gridStroke}
+                strokeDasharray="2 3"
+              />
+              <text
+                x={padL - 6}
+                y={toY(nTick) + 3}
+                textAnchor="end"
+                fill={tickFill}
+                fontSize="9"
+                fontFamily="monospace"
+              >
+                {nTick}
+              </text>
+            </g>
+          ))}
+
+          {/* N = Z Reference Diagonal */}
+          <line
+            x1={toX(0)}
+            y1={toY(0)}
+            x2={toX(120)}
+            y2={toY(120)}
+            stroke="#64748b"
+            strokeWidth="1.2"
+            strokeDasharray="4 3"
+          />
+          <text x={toX(104)} y={toY(110)} fill={tickFill} fontSize="9" fontFamily="monospace">
+            N = Z
+          </text>
+
+          {/* Z = 82 Lead Stability Boundary */}
+          <line
+            x1={toX(82)}
+            y1={padT}
+            x2={toX(82)}
+            y2={padT + plotH}
+            stroke="#f43f5e"
+            strokeOpacity="0.45"
+            strokeDasharray="3 3"
+          />
+          <text x={toX(84)} y={padT + 10} fill={limitFill} fontSize="8.5" fontFamily="monospace">
+            Z=82 limit
+          </text>
+
+          {/* Verified Stable Band of Stability (CIAAW / NuDat Z=1..83) */}
+          {STABLE_BAND_POINTS.map((pt, idx) => (
+            <circle
+              key={`sb-${idx}`}
+              cx={toX(pt.z)}
+              cy={toY(pt.n)}
+              r={1.7}
+              fill={isLight ? '#0284c7' : '#38bdf8'}
+              fillOpacity={isLight ? 0.5 : 0.42}
+            />
+          ))}
+
+          {/* Selected Element Vertical Crosshair */}
+          <line
+            x1={toX(Z)}
+            y1={padT}
+            x2={toX(Z)}
+            y2={padT + plotH}
+            stroke={isExclusivelyRadioactive ? '#f43f5e' : '#10b981'}
+            strokeWidth="1"
+            strokeOpacity="0.55"
+          />
+
+          {/* Selected Element Isotopes */}
+          {parsedMasses.map((iso, idx) => (
+            <g key={`cur-${idx}`}>
+              <circle
+                cx={toX(Z)}
+                cy={toY(iso.N)}
+                r={iso.label === primaryIso?.label ? 4.8 : 3.2}
+                fill={isExclusivelyRadioactive ? '#f43f5e' : '#10b981'}
+                stroke={isLight ? '#0f172a' : '#ffffff'}
+                strokeWidth="1.2"
+              >
+                <title>
+                  {iso.label}: Z={Z}, N={iso.N}, N/Z={iso.ratio.toFixed(2)} ({iso.abundance}%)
+                </title>
+              </circle>
+            </g>
+          ))}
+
+          {/* Axis Titles */}
+          <text
+            x={padL + plotW / 2}
+            y={H - 1}
+            textAnchor="middle"
+            fill={titleFill}
+            fontSize="9.5"
+            fontWeight="bold"
+          >
+            Atomic Number Z (Protons)
+          </text>
+          <text
+            x={11}
+            y={padT + plotH / 2}
+            textAnchor="middle"
+            fill={titleFill}
+            fontSize="9.5"
+            fontWeight="bold"
+            transform={`rotate(-90 11 ${padT + plotH / 2})`}
+          >
+            Neutrons (N)
+          </text>
+        </svg>
+      </div>
+    </div>
+  );
+};
+
 

@@ -1,5 +1,5 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import { MoleculeDossier, MoleculeAtomNode } from '@/types';
@@ -7,6 +7,11 @@ import { RotateCcw, Eye, Compass, RefreshCw, Columns } from 'lucide-react';
 import { calculateMolecularDipole3D } from '@/utils/molecularGraphEngine';
 
 export type RenderStyle3D = 'ball-and-stick' | 'space-filling' | 'licorice' | 'esp-polarity';
+
+export interface ActiveIrVibrationMode {
+  wavenumberCm: string;
+  assignment: string;
+}
 
 interface MoleculeCanvas3DProps {
   molecule: MoleculeDossier;
@@ -19,7 +24,18 @@ interface MoleculeCanvas3DProps {
   showBondAngles: boolean;
   selectedAtomIndex: number | null;
   onSelectAtom?: (index: number | null) => void;
+  activeIrMode?: ActiveIrVibrationMode | null;
+  onStopIrMode?: () => void;
 }
+
+// Reusable scratch math objects to prevent GC allocations inside useFrame
+const _irP1 = new THREE.Vector3();
+const _irP2 = new THREE.Vector3();
+const _irDiff = new THREE.Vector3();
+const _irMid = new THREE.Vector3();
+const _irDir = new THREE.Vector3();
+const _irQuat = new THREE.Quaternion();
+const _irUp = new THREE.Vector3(0, 1, 0);
 
 // Scientific CPK Element Color & Radius Palette (in Ångströms)
 export const CPK_PALETTE: Record<
@@ -113,13 +129,41 @@ function computeLonePairDirections(
   // Primary anti-bonding axis
   let awayAxis = sumBonded.clone().negate();
   if (awayAxis.lengthSq() < 0.001) {
-    // Symmetric center (e.g. XeF2 or XeF4)
+    // Symmetric center (e.g., linear XeF2 AX2E3 or square-planar XeF4 AX4E2 in ANY 3D orientation):
+    // Derive an orthonormal basis directly from the actual bond direction vectors.
+    if (neighborDirs.length >= 2) {
+      const u = neighborDirs[0].clone().normalize();
+      const refAxis =
+        Math.abs(u.x) < 0.85 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+      const perp1 = new THREE.Vector3().crossVectors(u, refAxis).normalize();
+      const perp2 = new THREE.Vector3().crossVectors(u, perp1).normalize();
+
+      if (lpCount === 2) {
+        // Find a non-collinear second neighbor to construct the true molecular plane normal
+        const nonCollinear = neighborDirs.find((d) => Math.abs(d.dot(u)) < 0.92);
+        const planeNormal = nonCollinear
+          ? new THREE.Vector3().crossVectors(u, nonCollinear).normalize()
+          : perp1;
+        return [planeNormal, planeNormal.clone().negate()];
+      }
+      if (lpCount === 3) {
+        // Trigonal equatorial belt orthogonal to the linear bond axis u (0°, 120°, 240°)
+        return [0, 1, 2].map((k) => {
+          const phi = (k * 2 * Math.PI) / 3;
+          return perp1
+            .clone()
+            .multiplyScalar(Math.cos(phi))
+            .add(perp2.clone().multiplyScalar(Math.sin(phi)))
+            .normalize();
+        });
+      }
+      return [perp1];
+    }
+
     if (lpCount === 2) {
-      // Trans lone pairs (e.g. XeF4 in XZ plane -> lone pairs on +Y and -Y)
       return [new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0)];
     }
     if (lpCount === 3) {
-      // Trigonal equatorial belt (e.g. XeF2 along X -> 3 lone pairs in YZ plane)
       return [
         new THREE.Vector3(0, 1, 0),
         new THREE.Vector3(0, -0.5, 0.866),
@@ -274,6 +318,122 @@ function computeRepresentativeAngles(
   return results;
 }
 
+/**
+ * Compute per-atom normal-mode displacement vectors for live 3D FT-IR vibrational playback.
+ */
+function computeIrNormalModeDisplacements(
+  atoms: MoleculeAtomNode[],
+  bonds: MoleculeDossier['bonds'],
+  activeIrMode: ActiveIrVibrationMode | null | undefined
+): { vectors: Array<[number, number, number]>; omega: number } | null {
+  if (!activeIrMode || atoms.length === 0) return null;
+
+  const text = `${activeIrMode.wavenumberCm} ${activeIrMode.assignment}`.toLowerCase();
+  const cmMatch = activeIrMode.wavenumberCm.replace(/,/g, '').match(/(\d{3,4})/);
+  const wavenumber = cmMatch ? parseInt(cmMatch[1], 10) : 1600;
+  // Visually readable oscillation frequency proportional to wavenumber
+  const omega = Math.max(4.5, Math.min(13.0, 3.2 + wavenumber / 380));
+
+  const isBend =
+    text.includes('bend') ||
+    text.includes('scissor') ||
+    text.includes('wag') ||
+    text.includes('rock') ||
+    text.includes('umbrella') ||
+    text.includes('deform') ||
+    text.includes('out-of-plane') ||
+    text.includes('oop');
+  const isAsym = text.includes('asym') || text.includes('antisym');
+  const isRing = text.includes('ring') || text.includes('aromatic');
+
+  // Identify targeted bond pair symbols if named in assignment (e.g. "O–H", "C=O", "C-H", "N-H", "S=O", "C≡N")
+  const pairRegex = /([a-z]{1,2})\s*[–—\-=≡]\s*([a-z]{1,2})/gi;
+  const targetPairs: Array<[string, string]> = [];
+  let match: RegExpExecArray | null;
+  while ((match = pairRegex.exec(activeIrMode.assignment)) !== null) {
+    const a = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
+    const b = match[2].charAt(0).toUpperCase() + match[2].slice(1).toLowerCase();
+    if (CPK_PALETTE[a] && CPK_PALETTE[b]) {
+      targetPairs.push([a, b]);
+    }
+  }
+
+  const disp: Array<[number, number, number]> = atoms.map(() => [0, 0, 0]);
+  let matchedBonds = 0;
+
+  bonds.forEach((b, bIdx) => {
+    const a1 = atoms[b.source];
+    const a2 = atoms[b.target];
+    if (!a1 || !a2) return;
+
+    const matchesTarget =
+      targetPairs.length === 0 ||
+      targetPairs.some(
+        ([s1, s2]) =>
+          (a1.symbol === s1 && a2.symbol === s2) || (a1.symbol === s2 && a2.symbol === s1)
+      );
+
+    if (!matchesTarget) return;
+    matchedBonds++;
+
+    const dx = a2.x - a1.x;
+    const dy = a2.y - a1.y;
+    const dz = a2.z - a1.z;
+    const len = Math.hypot(dx, dy, dz) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const uz = dz / len;
+
+    // Lighter atoms (e.g. H) move with larger amplitude to conserve center of mass
+    const w1 = a1.symbol === 'H' ? 0.17 : 0.06;
+    const w2 = a2.symbol === 'H' ? 0.17 : 0.06;
+    const phase = isAsym ? (bIdx % 2 === 0 ? 1 : -1) : 1;
+
+    if (isBend) {
+      // Orthogonal scissoring / wagging vector
+      const rx = Math.abs(uy) < 0.85 ? 0 : 1;
+      const ry = Math.abs(uy) < 0.85 ? 1 : 0;
+      const rz = 0;
+      let px = uy * rz - uz * ry;
+      let py = uz * rx - ux * rz;
+      let pz = ux * ry - uy * rx;
+      const pLen = Math.hypot(px, py, pz) || 1;
+      px /= pLen;
+      py /= pLen;
+      pz /= pLen;
+      const sign = bIdx % 2 === 0 ? 1 : -1;
+      disp[b.source][0] -= px * w1 * sign * 0.6;
+      disp[b.source][1] -= py * w1 * sign * 0.6;
+      disp[b.source][2] -= pz * w1 * sign * 0.6;
+      disp[b.target][0] += px * w2 * sign * 1.15;
+      disp[b.target][1] += py * w2 * sign * 1.15;
+      disp[b.target][2] += pz * w2 * sign * 1.15;
+    } else {
+      // Bond stretching along bond axis
+      disp[b.source][0] -= ux * w1 * phase;
+      disp[b.source][1] -= uy * w1 * phase;
+      disp[b.source][2] -= uz * w1 * phase;
+      disp[b.target][0] += ux * w2 * phase;
+      disp[b.target][1] += uy * w2 * phase;
+      disp[b.target][2] += uz * w2 * phase;
+    }
+  });
+
+  // Fallback radial breathing for ring modes or unmatched assignments
+  if (matchedBonds === 0 || isRing) {
+    atoms.forEach((a, i) => {
+      const r = Math.hypot(a.x, a.y, a.z) || 1;
+      const amp = a.symbol === 'H' ? 0.14 : 0.095;
+      const sign = isAsym && i % 2 === 1 ? -1 : 1;
+      disp[i][0] += (a.x / r) * amp * sign;
+      disp[i][1] += (a.y / r) * amp * sign;
+      disp[i][2] += (a.z / r) * amp * sign;
+    });
+  }
+
+  return { vectors: disp, omega };
+}
+
 interface MoleculeSceneContentProps {
   molecule: MoleculeDossier;
   renderStyle: RenderStyle3D;
@@ -285,6 +445,7 @@ interface MoleculeSceneContentProps {
   selectedAtomIndex: number | null;
   onSelectAtom?: (index: number | null) => void;
   autoRotate: boolean;
+  activeIrMode?: ActiveIrVibrationMode | null;
 }
 
 const MoleculeSceneContent: React.FC<MoleculeSceneContentProps> = ({
@@ -298,8 +459,11 @@ const MoleculeSceneContent: React.FC<MoleculeSceneContentProps> = ({
   selectedAtomIndex,
   onSelectAtom,
   autoRotate,
+  activeIrMode,
 }) => {
   const groupRef = useRef<THREE.Group>(null);
+  const atomGroupRefs = useRef<Array<THREE.Group | null>>([]);
+  const bondGroupRefs = useRef<Array<THREE.Group | null>>([]);
   const [hoveredAtom, setHoveredAtom] = useState<number | null>(null);
 
   // Center the molecule at (0,0,0)
@@ -332,10 +496,72 @@ const MoleculeSceneContent: React.FC<MoleculeSceneContentProps> = ({
     return { centeredAtoms: shifted, scaleFactor: scale };
   }, [molecule]);
 
-  // Subtle rotation if enabled
-  useFrame((_, delta) => {
+  const irNormalMode = useMemo(
+    () => computeIrNormalModeDisplacements(centeredAtoms, molecule.bonds, activeIrMode),
+    [centeredAtoms, molecule.bonds, activeIrMode]
+  );
+
+  // Precompute rest bond lengths for zero-allocation scaling during IR normal-mode vibration
+  const restBondLengths = useMemo(() => {
+    return molecule.bonds.map((b) => {
+      const a1 = centeredAtoms[b.source];
+      const a2 = centeredAtoms[b.target];
+      if (!a1 || !a2) return 1;
+      return Math.hypot(a2.x - a1.x, a2.y - a1.y, a2.z - a1.z) || 1;
+    });
+  }, [centeredAtoms, molecule.bonds]);
+
+  // Subtle rotation + real-time 3D IR harmonic vibrational normal-mode oscillation
+  useFrame((state, delta) => {
     if (autoRotate && groupRef.current) {
       groupRef.current.rotation.y += delta * 0.45;
+    }
+
+    const phase = irNormalMode ? Math.sin(state.clock.elapsedTime * irNormalMode.omega) : 0;
+
+    for (let i = 0; i < centeredAtoms.length; i++) {
+      const grp = atomGroupRefs.current[i];
+      if (!grp) continue;
+      const base = centeredAtoms[i];
+      if (irNormalMode) {
+        const dv = irNormalMode.vectors[i];
+        if (!dv) continue;
+        grp.position.set(base.x + dv[0] * phase, base.y + dv[1] * phase, base.z + dv[2] * phase);
+      } else {
+        grp.position.set(base.x, base.y, base.z);
+      }
+    }
+
+    if (renderStyle !== 'space-filling') {
+      for (let bIdx = 0; bIdx < molecule.bonds.length; bIdx++) {
+        const bGrp = bondGroupRefs.current[bIdx];
+        if (!bGrp) continue;
+        const bond = molecule.bonds[bIdx];
+        const a1 = centeredAtoms[bond.source];
+        const a2 = centeredAtoms[bond.target];
+        if (!a1 || !a2) continue;
+
+        if (irNormalMode) {
+          const dv1 = irNormalMode.vectors[bond.source];
+          const dv2 = irNormalMode.vectors[bond.target];
+          if (!dv1 || !dv2) continue;
+          _irP1.set(a1.x + dv1[0] * phase, a1.y + dv1[1] * phase, a1.z + dv1[2] * phase);
+          _irP2.set(a2.x + dv2[0] * phase, a2.y + dv2[1] * phase, a2.z + dv2[2] * phase);
+        } else {
+          _irP1.set(a1.x, a1.y, a1.z);
+          _irP2.set(a2.x, a2.y, a2.z);
+        }
+
+        _irDiff.subVectors(_irP2, _irP1);
+        const curLen = _irDiff.length() || 0.001;
+        _irMid.addVectors(_irP1, _irP2).multiplyScalar(0.5);
+        _irDir.copy(_irDiff).divideScalar(curLen);
+        _irQuat.setFromUnitVectors(_irUp, _irDir);
+
+        bGrp.position.copy(_irMid);
+        bGrp.quaternion.copy(_irQuat);
+        bGrp.scale.set(1, curLen / restBondLengths[bIdx], 1);
+      }
     }
   });
 
@@ -402,7 +628,13 @@ const MoleculeSceneContent: React.FC<MoleculeSceneContentProps> = ({
           : [];
 
         return (
-          <group key={`atom-${idx}`} position={[atom.x, atom.y, atom.z]}>
+          <group
+            key={`atom-${idx}`}
+            ref={(el) => {
+              atomGroupRefs.current[idx] = el;
+            }}
+            position={[atom.x, atom.y, atom.z]}
+          >
             <mesh
               onClick={(e) => {
                 e.stopPropagation();
@@ -521,11 +753,6 @@ const MoleculeSceneContent: React.FC<MoleculeSceneContentProps> = ({
             dir
           );
 
-          // Perpendicular offset vector for double/triple/aromatic bonds
-          const refVec =
-            Math.abs(dir.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
-          const perp = new THREE.Vector3().crossVectors(dir, refVec).normalize();
-
           const baseRadius = renderStyle === 'licorice' ? 0.14 : 0.068;
           const bondLengthText =
             bond.lengthAngstrom !== undefined
@@ -533,9 +760,16 @@ const MoleculeSceneContent: React.FC<MoleculeSceneContentProps> = ({
               : `${length.toFixed(2)} Å`;
 
           return (
-            <group key={`bond-${bIdx}`}>
+            <group
+              key={`bond-${bIdx}`}
+              ref={(el) => {
+                bondGroupRefs.current[bIdx] = el;
+              }}
+              position={[mid.x, mid.y, mid.z]}
+              quaternion={quat}
+            >
               {bond.order === 1 && (
-                <mesh position={[mid.x, mid.y, mid.z]} quaternion={quat}>
+                <mesh>
                   <cylinderGeometry args={[baseRadius, baseRadius, length, 20]} />
                   <meshStandardMaterial color="#94A3B8" roughness={0.35} metalness={0.25} />
                 </mesh>
@@ -543,25 +777,11 @@ const MoleculeSceneContent: React.FC<MoleculeSceneContentProps> = ({
 
               {(bond.order === 1.5 || bond.order === 1.33) && (
                 <>
-                  <mesh
-                    position={[
-                      mid.x + perp.x * 0.07,
-                      mid.y + perp.y * 0.07,
-                      mid.z + perp.z * 0.07,
-                    ]}
-                    quaternion={quat}
-                  >
+                  <mesh position={[0.07, 0, 0]}>
                     <cylinderGeometry args={[baseRadius * 0.8, baseRadius * 0.8, length, 18]} />
                     <meshStandardMaterial color="#94A3B8" roughness={0.35} metalness={0.25} />
                   </mesh>
-                  <mesh
-                    position={[
-                      mid.x - perp.x * 0.07,
-                      mid.y - perp.y * 0.07,
-                      mid.z - perp.z * 0.07,
-                    ]}
-                    quaternion={quat}
-                  >
+                  <mesh position={[-0.07, 0, 0]}>
                     <cylinderGeometry args={[baseRadius * 0.65, baseRadius * 0.65, length * 0.85, 18]} />
                     <meshStandardMaterial
                       color="#38BDF8"
@@ -575,25 +795,11 @@ const MoleculeSceneContent: React.FC<MoleculeSceneContentProps> = ({
 
               {bond.order === 2 && (
                 <>
-                  <mesh
-                    position={[
-                      mid.x + perp.x * 0.085,
-                      mid.y + perp.y * 0.085,
-                      mid.z + perp.z * 0.085,
-                    ]}
-                    quaternion={quat}
-                  >
+                  <mesh position={[0.085, 0, 0]}>
                     <cylinderGeometry args={[baseRadius * 0.78, baseRadius * 0.78, length, 18]} />
                     <meshStandardMaterial color="#94A3B8" roughness={0.35} metalness={0.25} />
                   </mesh>
-                  <mesh
-                    position={[
-                      mid.x - perp.x * 0.085,
-                      mid.y - perp.y * 0.085,
-                      mid.z - perp.z * 0.085,
-                    ]}
-                    quaternion={quat}
-                  >
+                  <mesh position={[-0.085, 0, 0]}>
                     <cylinderGeometry args={[baseRadius * 0.78, baseRadius * 0.78, length, 18]} />
                     <meshStandardMaterial color="#64748B" roughness={0.35} metalness={0.25} />
                   </mesh>
@@ -602,29 +808,15 @@ const MoleculeSceneContent: React.FC<MoleculeSceneContentProps> = ({
 
               {bond.order === 3 && (
                 <>
-                  <mesh position={[mid.x, mid.y, mid.z]} quaternion={quat}>
+                  <mesh>
                     <cylinderGeometry args={[baseRadius * 0.72, baseRadius * 0.72, length, 18]} />
                     <meshStandardMaterial color="#94A3B8" roughness={0.35} metalness={0.25} />
                   </mesh>
-                  <mesh
-                    position={[
-                      mid.x + perp.x * 0.12,
-                      mid.y + perp.y * 0.12,
-                      mid.z + perp.z * 0.12,
-                    ]}
-                    quaternion={quat}
-                  >
+                  <mesh position={[0.12, 0, 0]}>
                     <cylinderGeometry args={[baseRadius * 0.65, baseRadius * 0.65, length, 16]} />
                     <meshStandardMaterial color="#64748B" roughness={0.35} metalness={0.25} />
                   </mesh>
-                  <mesh
-                    position={[
-                      mid.x - perp.x * 0.12,
-                      mid.y - perp.y * 0.12,
-                      mid.z - perp.z * 0.12,
-                    ]}
-                    quaternion={quat}
-                  >
+                  <mesh position={[-0.12, 0, 0]}>
                     <cylinderGeometry args={[baseRadius * 0.65, baseRadius * 0.65, length, 16]} />
                     <meshStandardMaterial color="#64748B" roughness={0.35} metalness={0.25} />
                   </mesh>
@@ -633,7 +825,7 @@ const MoleculeSceneContent: React.FC<MoleculeSceneContentProps> = ({
 
               {/* Bond Length Badge */}
               {showBondLengths && (
-                <Html position={[mid.x, mid.y, mid.z]} center distanceFactor={8} zIndexRange={[5, 0]}>
+                <Html position={[0, 0, 0]} center distanceFactor={8} zIndexRange={[5, 0]}>
                   <div className="pointer-events-none select-none px-1 py-0.5 rounded bg-emerald-950/90 text-emerald-300 border border-emerald-500/40 text-[9px] font-mono shadow">
                     {bondLengthText}
                   </div>
@@ -744,7 +936,28 @@ interface SingleViewportProps {
   autoRotate: boolean;
   cameraPosition: [number, number, number];
   cameraResetKey: number;
+  activeIrMode?: ActiveIrVibrationMode | null;
+  onStopIrMode?: () => void;
 }
+
+const CameraRig: React.FC<{
+  cameraPosition: [number, number, number];
+  cameraResetKey: number;
+  moleculeId: string;
+  controlsRef: React.RefObject<any>;
+}> = ({ cameraPosition, cameraResetKey, moleculeId, controlsRef }) => {
+  const { camera } = useThree();
+  useEffect(() => {
+    camera.position.set(cameraPosition[0], cameraPosition[1], cameraPosition[2]);
+    if (controlsRef.current) {
+      controlsRef.current.target.set(0, 0, 0);
+      controlsRef.current.update();
+    } else {
+      camera.lookAt(0, 0, 0);
+    }
+  }, [camera, cameraPosition, cameraResetKey, moleculeId, controlsRef]);
+  return null;
+};
 
 const SingleViewport: React.FC<SingleViewportProps> = ({
   molecule,
@@ -760,7 +973,11 @@ const SingleViewport: React.FC<SingleViewportProps> = ({
   autoRotate,
   cameraPosition,
   cameraResetKey,
+  activeIrMode,
+  onStopIrMode,
 }) => {
+  const controlsRef = useRef<any>(null);
+
   return (
     <div
       data-dark-stage="true"
@@ -792,12 +1009,34 @@ const SingleViewport: React.FC<SingleViewportProps> = ({
         </div>
       </div>
 
-      {/* Three.js WebGL Canvas */}
+      {/* Active IR Vibrational Normal Mode Overlay Badge */}
+      {activeIrMode && (
+        <div className="absolute top-3 right-3 z-10 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-950/90 backdrop-blur-md border border-indigo-400/40 text-indigo-100 shadow-lg text-[11px]">
+          <span className="font-mono font-bold text-cyan-300">{activeIrMode.wavenumberCm}</span>
+          <span className="text-slate-300 max-w-[160px] truncate">{activeIrMode.assignment}</span>
+          {onStopIrMode && (
+            <button
+              type="button"
+              onClick={onStopIrMode}
+              className="px-1.5 py-0.5 rounded bg-indigo-500/30 hover:bg-indigo-500/50 text-white font-bold text-[10px] cursor-pointer"
+            >
+              Stop
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Three.js WebGL Canvas (persistent WebGL context; camera updated via CameraRig) */}
       <Canvas
-        key={`${molecule.id}-${cameraResetKey}`}
         camera={{ position: cameraPosition, fov: 42 }}
         gl={{ antialias: true }}
       >
+        <CameraRig
+          cameraPosition={cameraPosition}
+          cameraResetKey={cameraResetKey}
+          moleculeId={molecule.id}
+          controlsRef={controlsRef}
+        />
         <ambientLight intensity={0.75} />
         <directionalLight position={[6, 8, 6]} intensity={1.35} />
         <directionalLight position={[-6, -5, -4]} intensity={0.55} color="#38BDF8" />
@@ -814,9 +1053,11 @@ const SingleViewport: React.FC<SingleViewportProps> = ({
           selectedAtomIndex={selectedAtomIndex}
           onSelectAtom={onSelectAtom}
           autoRotate={autoRotate}
+          activeIrMode={activeIrMode}
         />
 
         <OrbitControls
+          ref={controlsRef}
           enablePan={true}
           enableZoom={true}
           enableRotate={true}
@@ -839,6 +1080,8 @@ export const MoleculeCanvas3D: React.FC<MoleculeCanvas3DProps> = ({
   showBondAngles,
   selectedAtomIndex,
   onSelectAtom,
+  activeIrMode = null,
+  onStopIrMode,
 }) => {
   const [autoRotate, setAutoRotate] = useState<boolean>(true);
   const [cameraPosition, setCameraPosition] = useState<[number, number, number]>([0, 0.8, 5.2]);
@@ -871,6 +1114,8 @@ export const MoleculeCanvas3D: React.FC<MoleculeCanvas3DProps> = ({
           autoRotate={autoRotate}
           cameraPosition={cameraPosition}
           cameraResetKey={cameraResetKey}
+          activeIrMode={activeIrMode}
+          onStopIrMode={onStopIrMode}
         />
 
         {comparisonMolecule && (

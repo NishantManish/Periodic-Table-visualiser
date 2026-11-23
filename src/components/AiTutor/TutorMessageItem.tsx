@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { playSound } from '../../utils/audio';
+import { FormattedChemMarkdown } from '../ui/FormattedChemMarkdown';
 
 export interface QuizPayload {
   question: string;
@@ -92,68 +93,6 @@ export const TutorMessageItem: React.FC<TutorMessageItemProps> = ({
     playSound('click', soundEnabled);
   };
 
-  // Render formatted markdown-style text with chemistry typography
-  const renderFormattedText = (content: string) => {
-    const lines = content.split('\n');
-
-    return (
-      <div className="space-y-2 leading-relaxed text-[13px]">
-        {lines.map((line, idx) => {
-          const trimmed = line.trim();
-          if (!trimmed) return <div key={idx} className="h-1.5" />;
-
-          // Heading Level 2 or 3
-          if (trimmed.startsWith('### ')) {
-            return (
-              <h4 key={idx} className="text-sm font-black text-purple-300 pt-2 pb-1 flex items-center gap-2">
-                <Sparkles className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                {trimmed.replace('### ', '')}
-              </h4>
-            );
-          }
-          if (trimmed.startsWith('## ') || trimmed.startsWith('# ')) {
-            return (
-              <h3 key={idx} className="text-base font-extrabold text-white pt-2 pb-1 border-b border-white/10">
-                {trimmed.replace(/^#+\s/, '')}
-              </h3>
-            );
-          }
-
-          // Bullet points
-          if (trimmed.startsWith('* ') || trimmed.startsWith('- ') || trimmed.startsWith('• ')) {
-            const itemText = trimmed.replace(/^[*•-]\s+/, '');
-            return (
-              <div key={idx} className="flex items-start gap-2 text-white/80 pl-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-purple-400 mt-2 shrink-0" />
-                <span dangerouslySetInnerHTML={{ __html: formatInlineMarkdown(itemText) }} />
-              </div>
-            );
-          }
-
-          // Regular paragraph
-          return (
-            <p
-              key={idx}
-              className="text-white/90 font-normal"
-              dangerouslySetInnerHTML={{ __html: formatInlineMarkdown(line) }}
-            />
-          );
-        })}
-      </div>
-    );
-  };
-
-  // Helper to format bold, code, chemical tags safely after HTML-entity escaping (Fixes BUG-10)
-  const formatInlineMarkdown = (text: string) => {
-    const escaped = text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-    return escaped
-      .replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-white">$1</strong>')
-      .replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-300 font-mono text-[11px] border border-purple-500/30">$1</code>');
-  };
-
   const isUser = message.sender === 'user';
 
   return (
@@ -210,7 +149,7 @@ export const TutorMessageItem: React.FC<TutorMessageItemProps> = ({
           {isUser ? (
             <p className="text-[13px] leading-relaxed font-medium whitespace-pre-wrap drop-shadow-sm">{message.text}</p>
           ) : (
-            renderFormattedText(message.text)
+            <FormattedChemMarkdown text={message.text} variant="dark" />
           )}
 
           {/* Interactive Quiz Module */}

@@ -110,28 +110,55 @@ function resolveReactionFromSetup(setup: PendingReactionSetup): {
 
   if (key === 'H+N' || (symbols.includes('N₂') && symbols.includes('H₂'))) {
     const haber = REACTIONS_LIBRARY.find((r) => r.id === 'haber-process') || REACTIONS_LIBRARY[0];
+    const catalystLabel = setup.catalyst ? haber.requiredConditions.catalyst || 'Iron (Fe) with K₂O promoter' : 'None';
     return {
-      reaction: haber,
+      reaction: {
+        ...haber,
+        requiredConditions: {
+          ...haber.requiredConditions,
+          temp: setup.temperature,
+          pressure: setup.pressure,
+          catalyst: setup.catalyst ? catalystLabel : undefined,
+        },
+      },
       reagents: ['N₂', 'H₂'],
-      catalystLabel: setup.catalyst ? haber.requiredConditions.catalyst || 'Iron (Fe) with K₂O promoter' : 'None',
+      catalystLabel,
       isPreset: true,
     };
   }
   if (key === 'H+O' || (symbols.includes('H₂') && symbols.includes('O₂'))) {
     const water = REACTIONS_LIBRARY.find((r) => r.id === 'water-synthesis') || REACTIONS_LIBRARY[2];
+    const catalystLabel = setup.catalyst ? water.requiredConditions.catalyst || 'Platinum wire or spark' : 'None';
     return {
-      reaction: water,
+      reaction: {
+        ...water,
+        requiredConditions: {
+          ...water.requiredConditions,
+          temp: setup.temperature,
+          pressure: setup.pressure,
+          catalyst: setup.catalyst ? catalystLabel : undefined,
+        },
+      },
       reagents: ['H₂', 'O₂'],
-      catalystLabel: setup.catalyst ? water.requiredConditions.catalyst || 'Platinum wire or spark' : 'None',
+      catalystLabel,
       isPreset: true,
     };
   }
   if (key === 'C+H+O' || key === 'CH4+O2' || (symbols.includes('CH₄') && symbols.includes('O₂'))) {
     const meth = REACTIONS_LIBRARY.find((r) => r.id === 'combustion-methane') || REACTIONS_LIBRARY[1];
+    const catalystLabel = setup.catalyst ? meth.requiredConditions.catalyst || 'Spark / Ignition Flame' : 'None';
     return {
-      reaction: meth,
+      reaction: {
+        ...meth,
+        requiredConditions: {
+          ...meth.requiredConditions,
+          temp: setup.temperature,
+          pressure: setup.pressure,
+          catalyst: setup.catalyst ? catalystLabel : undefined,
+        },
+      },
       reagents: ['CH₄', 'O₂'],
-      catalystLabel: setup.catalyst ? meth.requiredConditions.catalyst || 'Spark / Ignition Flame' : 'None',
+      catalystLabel,
       isPreset: true,
     };
   }
@@ -294,6 +321,7 @@ export const ReactionSimulator: React.FC = () => {
   const [customReactantsInput, setCustomReactantsInput] = useState('');
   const [aiResult, setAiResult] = useState<Record<string, any> | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [activeAiMeta, setActiveAiMeta] = useState<{ provider: string; model: string } | null>(null);
 
   // Chamber Particle Animation Canvas Refs
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -864,6 +892,16 @@ export const ReactionSimulator: React.FC = () => {
       });
 
       const data = await res.json();
+      if (!res.ok) {
+        setAiResult({ error: data.error || 'Could not predict chemical reaction.' });
+        return;
+      }
+      if (data.provider || data.model) {
+        setActiveAiMeta({
+          provider: data.provider || 'ai',
+          model: data.model || 'AI Chemistry Engine',
+        });
+      }
       if (data.result && !data.result.error) {
         setAiResult(data.result);
 
@@ -950,10 +988,13 @@ export const ReactionSimulator: React.FC = () => {
     if (parts.length < 2) return 0;
 
     const KNOWN_GASES = new Set([
-      'H₂', 'O₂', 'N₂', 'F₂', 'Cl₂', 'NH₃', 'CO', 'CO₂', 'SO₂', 'SO₃',
-      'NO', 'NO₂', 'N₂O', 'N₂O₄', 'CH₄', 'C₂H₄', 'C₂H₂', 'C₃H₈', 'C₄H₁₀',
-      'HCl', 'HI', 'HBr', 'H₂S', 'O₃',
+      'H2', 'O2', 'N2', 'F2', 'Cl2', 'NH3', 'CO', 'CO2', 'SO2', 'SO3',
+      'NO', 'NO2', 'N2O', 'N2O4', 'CH4', 'C2H4', 'C2H2', 'C3H8', 'C4H10',
+      'HCl', 'HI', 'HBr', 'H2S', 'O3',
     ]);
+
+    const normalizeSubscripts = (s: string) =>
+      s.replace(/[₀₁₂₃₄₅₆₇₈₉]/g, (ch) => String('₀₁₂₃₄₅₆₇₈₉'.indexOf(ch)));
 
     const isGasPhaseRxn = selectedReaction.phaseState?.toLowerCase().includes('gas');
 
@@ -969,13 +1010,14 @@ export const ReactionSimulator: React.FC = () => {
           const m = term.match(/^(\d+)\s*(.*)$/);
           const coeff = m ? parseInt(m[1], 10) : 1;
           const speciesRaw = (m ? m[2] : term).replace(/\(g\)|↑/g, '').trim();
+          const speciesAscii = normalizeSubscripts(speciesRaw);
 
           const isExplicitGas = term.includes('(g)') || term.includes('↑');
           const isWaterVapor =
-            speciesRaw === 'H₂O' && (isGasPhaseRxn || temperature >= 100 || selectedReaction.reactionType === 'Combustion');
-          const isIodineVapor = speciesRaw === 'I₂' && (isGasPhaseRxn || temperature >= 184);
+            speciesAscii === 'H2O' && (isGasPhaseRxn || temperature >= 100 || selectedReaction.reactionType === 'Combustion');
+          const isIodineVapor = speciesAscii === 'I2' && (isGasPhaseRxn || temperature >= 184);
 
-          if (isExplicitGas || KNOWN_GASES.has(speciesRaw) || isWaterVapor || isIodineVapor) {
+          if (isExplicitGas || KNOWN_GASES.has(speciesAscii) || isWaterVapor || isIodineVapor) {
             return sum + coeff;
           }
           return sum;
@@ -1222,7 +1264,10 @@ export const ReactionSimulator: React.FC = () => {
                 </p>
               </div>
               <span className="text-[11px] px-2.5 py-1 rounded-full bg-purple-950 text-purple-300 border border-purple-500/40 font-bold flex items-center gap-1.5">
-                <Cpu className="w-3.5 h-3.5 text-purple-400" /> Llama 3.3 70B Instruct
+                <Cpu className="w-3.5 h-3.5 text-purple-400" />
+                {activeAiMeta
+                  ? `${activeAiMeta.model} (${activeAiMeta.provider})`
+                  : 'AI Reaction Engine'}
               </span>
             </div>
 

@@ -211,22 +211,25 @@ async function callNvidiaNim({
 async function callGeminiFallback({
   systemPrompt,
   userPrompt,
-  maxTokens = 600,
+  jsonMode = false,
 }: {
   systemPrompt: string;
   userPrompt: string;
-  maxTokens?: number;
+  jsonMode?: boolean;
 }) {
   const ai = getAiClient();
   const start = Date.now();
-  const modelName = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
+  const modelName = process.env.GEMINI_MODEL?.trim() || "gemini-4-hydrogen";
+  const config: Record<string, unknown> = {
+    systemInstruction: systemPrompt,
+  };
+  if (jsonMode) {
+    config.responseMimeType = "application/json";
+  }
   const response = await ai.models.generateContent({
     model: modelName,
     contents: userPrompt,
-    config: {
-      systemInstruction: systemPrompt,
-      maxOutputTokens: maxTokens,
-    },
+    config,
   });
   return {
     content: (response.text || "").trim(),
@@ -244,8 +247,12 @@ function hasNvidiaNim(): boolean {
 // API: AI Tutor / Element Explanation / Custom Query
 app.post("/api/ai/explain", async (req, res) => {
   try {
-    const { prompt, gradeLevel, mode } = req.body;
-    const cacheKey = `explain:${gradeLevel || "Grade 10"}:${mode || "normal"}:${(prompt || "").trim().toLowerCase()}`;
+    const { prompt, gradeLevel, mode } = req.body ?? {};
+    const cleanPrompt = typeof prompt === "string" ? prompt.trim() : "";
+    if (!cleanPrompt) {
+      return res.status(400).json({ error: "A chemistry question or prompt is required." });
+    }
+    const cacheKey = `explain:${gradeLevel || "Grade 10"}:${mode || "normal"}:${cleanPrompt.toLowerCase()}`;
     const cached = getCached(cacheKey);
     if (cached) {
       return res.json({ ...cached, cached: true, latencyMs: 2 });
@@ -270,10 +277,10 @@ Rules:
 
     if (hasNvidiaNim()) {
       try {
-        const { content, latencyMs, model } = await callNvidiaNim({
+        const { content, latencyMs, model, provider } = await callNvidiaNim({
           messages: [
             { role: "system", content: systemPrompt },
-            { role: "user", content: prompt },
+            { role: "user", content: cleanPrompt },
           ],
           temperature: 0.35,
           max_tokens: 450,
@@ -281,16 +288,15 @@ Rules:
 
         resultPayload = {
           result: content,
-          provider: "nvidia-nim",
+          provider,
           model,
           latencyMs,
         };
       } catch (nimErr) {
-        console.warn("NVIDIA NIM call failed, falling back to Gemini:", nimErr);
+        console.warn("Primary AI provider failed, falling back to Gemini:", nimErr);
         const { content, latencyMs, model } = await callGeminiFallback({
           systemPrompt,
-          userPrompt: prompt,
-          maxTokens: 450,
+          userPrompt: cleanPrompt,
         });
         resultPayload = {
           result: content,
@@ -302,8 +308,7 @@ Rules:
     } else {
       const { content, latencyMs, model } = await callGeminiFallback({
         systemPrompt,
-        userPrompt: prompt,
-        maxTokens: 450,
+        userPrompt: cleanPrompt,
       });
       resultPayload = {
         result: content,
@@ -313,7 +318,9 @@ Rules:
       };
     }
 
-    setCached(cacheKey, resultPayload);
+    if (resultPayload.result) {
+      setCached(cacheKey, resultPayload);
+    }
     return res.json(resultPayload);
   } catch (error: any) {
     console.error("AI Explain API Error:", error);
@@ -324,12 +331,16 @@ Rules:
 // API: Reaction Predictor
 app.post("/api/ai/predict-reaction", async (req, res) => {
   try {
-    const { reactants, conditions } = req.body;
-    const temp = conditions?.temp ?? req.body.temperature ?? 25;
-    const pressure = conditions?.pressure ?? req.body.pressure ?? 1;
-    const catalyst = conditions?.catalyst ?? req.body.catalyst ?? "None";
+    const body = req.body ?? {};
+    const { reactants, conditions } = body;
+    const temp = conditions?.temp ?? body.temperature ?? 25;
+    const pressure = conditions?.pressure ?? body.pressure ?? 1;
+    const catalyst = conditions?.catalyst ?? body.catalyst ?? "None";
 
-    const reactantsText = Array.isArray(reactants) ? reactants.join(" + ") : String(reactants || "");
+    const reactantsText = (Array.isArray(reactants) ? reactants.join(" + ") : String(reactants || "")).trim();
+    if (!reactantsText) {
+      return res.status(400).json({ error: "Reactants are required to predict a chemical reaction." });
+    }
     const cacheKey = `reaction:${reactantsText}:${temp}:${pressure}:${catalyst}`;
     const cached = getCached(cacheKey);
     if (cached) {
@@ -375,29 +386,29 @@ Output strictly valid JSON (no markdown formatting, only JSON) matching:
 
     if (hasNvidiaNim()) {
       try {
-        const { content, latencyMs, model } = await callNvidiaNim({
+        const { content, latencyMs, model, provider } = await callNvidiaNim({
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: prompt },
           ],
           temperature: 0.2,
-          max_tokens: 500,
-          timeoutMs: 8000,
+          max_tokens: 650,
+          timeoutMs: 10000,
         });
 
         const parsed = extractJson(content);
         resultPayload = {
           result: parsed,
-          provider: "nvidia-nim",
+          provider,
           model,
           latencyMs,
         };
       } catch (nimErr) {
-        console.warn("NVIDIA NIM reaction call failed, falling back to Gemini:", nimErr);
+        console.warn("Primary AI reaction call failed, falling back to Gemini:", nimErr);
         const { content, latencyMs, model } = await callGeminiFallback({
           systemPrompt,
           userPrompt: prompt,
-          maxTokens: 500,
+          jsonMode: true,
         });
         const parsed = extractJson(content);
         resultPayload = {
@@ -411,7 +422,7 @@ Output strictly valid JSON (no markdown formatting, only JSON) matching:
       const { content, latencyMs, model } = await callGeminiFallback({
         systemPrompt,
         userPrompt: prompt,
-        maxTokens: 500,
+        jsonMode: true,
       });
       const parsed = extractJson(content);
       resultPayload = {
@@ -433,11 +444,12 @@ Output strictly valid JSON (no markdown formatting, only JSON) matching:
 // API: Generate Custom Quiz Question using NVIDIA NIM API with fallback
 app.post("/api/ai/generate-quiz", async (req, res) => {
   try {
-    const { topic, difficulty, count = 1 } = req.body;
+    const { topic, difficulty, count: rawCount = 1 } = req.body ?? {};
+    const count = Math.max(1, Math.min(10, Math.floor(Number(rawCount) || 1)));
     
     // Check if it's a request for a random question to skip cache entirely
-    const isRandomRequest = (topic || "").toLowerCase().includes("random");
-    const cacheKey = `quiz:${(topic || "").toLowerCase().trim()}:${difficulty || "Grade 10"}`;
+    const isRandomRequest = String(topic || "").toLowerCase().includes("random");
+    const cacheKey = `quiz:${String(topic || "").toLowerCase().trim()}:${difficulty || "Grade 10"}:${count}`;
     
     if (!isRandomRequest) {
       const cachedData = getCached(cacheKey);
@@ -474,14 +486,14 @@ Important: "correctIndex" must be integer (0, 1, 2, or 3).`;
 
     if (hasNvidiaNim()) {
       try {
-        const { content, latencyMs, model } = await callNvidiaNim({
+        const { content, latencyMs, model, provider } = await callNvidiaNim({
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: prompt },
           ],
           temperature: 0.5,
-          max_tokens: 380,
-          timeoutMs: 8000,
+          max_tokens: 450,
+          timeoutMs: 10000,
         });
 
         const parsed = extractJson(content);
@@ -489,17 +501,17 @@ Important: "correctIndex" must be integer (0, 1, 2, or 3).`;
 
         resultPayload = {
           questions,
-          provider: "nvidia-nim",
+          provider,
           model,
           latencyMs,
           archetype: randomArchetype,
         };
       } catch (nimErr) {
-        console.warn("NVIDIA NIM quiz generation failed, falling back to Gemini:", nimErr);
+        console.warn("Primary AI quiz generation failed, falling back to Gemini:", nimErr);
         const { content, latencyMs, model } = await callGeminiFallback({
           systemPrompt,
           userPrompt: prompt,
-          maxTokens: 380,
+          jsonMode: true,
         });
         const parsed = extractJson(content);
         const questions = Array.isArray(parsed) ? parsed : (parsed.questions || []);
@@ -515,7 +527,7 @@ Important: "correctIndex" must be integer (0, 1, 2, or 3).`;
       const { content, latencyMs, model } = await callGeminiFallback({
         systemPrompt,
         userPrompt: prompt,
-        maxTokens: 380,
+        jsonMode: true,
       });
       const parsed = extractJson(content);
       const questions = Array.isArray(parsed) ? parsed : (parsed.questions || []);
@@ -541,7 +553,7 @@ Important: "correctIndex" must be integer (0, 1, 2, or 3).`;
 // API: Analyze Custom Molecule & Structural Isomers with 3D Coordinates
 app.post("/api/ai/analyze-molecule", async (req, res) => {
   try {
-    const { query } = req.body;
+    const { query } = req.body ?? {};
     const cleanQuery = String(query || "").trim();
     if (!cleanQuery) {
       return res.status(400).json({ error: "Molecule query is required." });
@@ -668,23 +680,23 @@ Output strictly valid JSON matching this exact MoleculeDossier schema (no markdo
 
     if (hasNvidiaNim()) {
       try {
-        const { content, latencyMs, model } = await callNvidiaNim({
+        const { content, latencyMs, model, provider } = await callNvidiaNim({
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: prompt },
           ],
           temperature: 0.2,
-          max_tokens: 1800,
+          max_tokens: 2048,
           timeoutMs: 15000,
         });
         const parsed = extractJson(content);
-        resultPayload = { result: parsed, provider: "nvidia-nim", model, latencyMs };
+        resultPayload = { result: parsed, provider, model, latencyMs };
       } catch (nimErr) {
-        console.warn("NVIDIA NIM molecule analysis failed, falling back to Gemini:", nimErr);
+        console.warn("Primary AI molecule analysis failed, falling back to Gemini:", nimErr);
         const { content, latencyMs, model } = await callGeminiFallback({
           systemPrompt,
           userPrompt: prompt,
-          maxTokens: 1800,
+          jsonMode: true,
         });
         const parsed = extractJson(content);
         resultPayload = { result: parsed, provider: "gemini", model, latencyMs };
@@ -693,7 +705,7 @@ Output strictly valid JSON matching this exact MoleculeDossier schema (no markdo
       const { content, latencyMs, model } = await callGeminiFallback({
         systemPrompt,
         userPrompt: prompt,
-        maxTokens: 1800,
+        jsonMode: true,
       });
       const parsed = extractJson(content);
       resultPayload = { result: parsed, provider: "gemini", model, latencyMs };

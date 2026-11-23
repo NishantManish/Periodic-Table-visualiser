@@ -145,8 +145,14 @@ export const AtomViewer3D: React.FC = () => {
   const [showNodalPlanes, setShowNodalPlanes] = useState<boolean>(false);
   const [renderStyle, setRenderStyle] = useState<RenderStyle>('realistic');
 
+  const isInternalTabSwitchRef = useRef(false);
+
   // Synchronize external deep-link atom3DTab -> AtomViewer3D sub-view & orbital mode
   useEffect(() => {
+    if (isInternalTabSwitchRef.current) {
+      isInternalTabSwitchRef.current = false;
+      return;
+    }
     const activeEl = selectedElement || localElement;
     if (atom3DTab === 'crystal') {
       setActiveMode('crystal-lattice');
@@ -347,11 +353,14 @@ export const AtomViewer3D: React.FC = () => {
               onClick={() => {
                 const nextMode = tab.id as typeof activeMode;
                 setActiveMode(nextMode);
+                isInternalTabSwitchRef.current = true;
                 if (nextMode === 'crystal-lattice') setAtom3DTab('crystal');
                 else if (nextMode === 'aufbau-filling') setAtom3DTab('quantum-numbers');
                 else if (nextMode === 'bohr-quantum') setAtom3DTab('energy');
                 else if (nextMode === '3d-atom') {
                   setAtom3DTab(orbitalType === 'bohr' ? 'bohr' : 'orbitals');
+                } else {
+                  isInternalTabSwitchRef.current = false;
                 }
               }}
               className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${

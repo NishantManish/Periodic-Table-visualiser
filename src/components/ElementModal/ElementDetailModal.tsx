@@ -25,112 +25,11 @@ import {
 import { AbundanceChart } from './AbundanceChart';
 import { IsotopeCalculator } from './IsotopeCalculator';
 import { useToast } from '../ui/Toast';
+import { FormattedChemMarkdown } from '../ui/FormattedChemMarkdown';
 
 const CrystalLatticeView = React.lazy(() =>
   import('../Atom3D/CrystalLatticeView').then((m) => ({ default: m.CrystalLatticeView }))
 );
-
-function formatChemistrySubscripts(text: string): string {
-  return text
-    .replace(/\bH2O\b/g, 'H₂O')
-    .replace(/\bCO2\b/g, 'CO₂')
-    .replace(/\bNH3\b/g, 'NH₃')
-    .replace(/\bCH4\b/g, 'CH₄')
-    .replace(/\bSO2\b/g, 'SO₂')
-    .replace(/\bH2SO4\b/g, 'H₂SO₄')
-    .replace(/\bO2\b/g, 'O₂')
-    .replace(/\bN2\b/g, 'N₂')
-    .replace(/\bH2\b/g, 'H₂')
-    .replace(/\bCl2\b/g, 'Cl₂')
-    .replace(/\bsp3d2\b/g, 'sp³d²')
-    .replace(/\bsp3d\b/g, 'sp³d')
-    .replace(/\bsp3\b/g, 'sp³')
-    .replace(/\bsp2\b/g, 'sp²');
-}
-
-function renderInlineChemistryNodes(rawText: string): React.ReactNode[] {
-  const formatted = formatChemistrySubscripts(rawText);
-  const tokens = formatted.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
-  return tokens.map((token, i) => {
-    if (token.startsWith('**') && token.endsWith('**') && token.length > 4) {
-      return (
-        <strong key={i} className="font-bold text-slate-950 dark:text-white">
-          {token.slice(2, -2)}
-        </strong>
-      );
-    }
-    if (token.startsWith('`') && token.endsWith('`') && token.length > 2) {
-      return (
-        <code
-          key={i}
-          className="px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-950/70 text-purple-800 dark:text-purple-200 font-mono text-[11px] border border-purple-300 dark:border-purple-500/30"
-        >
-          {token.slice(1, -1)}
-        </code>
-      );
-    }
-    return <React.Fragment key={i}>{token}</React.Fragment>;
-  });
-}
-
-function renderChemistryMarkdown(content: string): React.ReactNode {
-  const lines = content.split('\n');
-  return (
-    <div className="space-y-2 text-[13px] leading-relaxed text-slate-800 dark:text-slate-200">
-      {lines.map((line, idx) => {
-        const trimmed = line.trim();
-        if (!trimmed) return <div key={idx} className="h-1.5" />;
-
-        if (trimmed.startsWith('### ')) {
-          return (
-            <h4
-              key={idx}
-              className="text-sm font-extrabold text-purple-700 dark:text-purple-300 pt-2 pb-0.5 flex items-center gap-1.5"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-purple-500 dark:text-purple-400 shrink-0" />
-              <span>{renderInlineChemistryNodes(trimmed.slice(4))}</span>
-            </h4>
-          );
-        }
-
-        if (trimmed.startsWith('## ') || trimmed.startsWith('# ')) {
-          return (
-            <h3
-              key={idx}
-              className="text-base font-extrabold text-slate-950 dark:text-white pt-2 pb-1 border-b border-slate-200 dark:border-white/10"
-            >
-              {renderInlineChemistryNodes(trimmed.replace(/^#+\s+/, ''))}
-            </h3>
-          );
-        }
-
-        const numberedMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
-        if (numberedMatch) {
-          return (
-            <div key={idx} className="flex items-start gap-2 pl-1">
-              <span className="font-mono text-xs font-bold text-purple-600 dark:text-purple-400 mt-0.5 shrink-0">
-                {numberedMatch[1]}.
-              </span>
-              <span>{renderInlineChemistryNodes(numberedMatch[2])}</span>
-            </div>
-          );
-        }
-
-        if (trimmed.startsWith('* ') || trimmed.startsWith('- ') || trimmed.startsWith('• ')) {
-          const itemText = trimmed.replace(/^[*•-]\s+/, '');
-          return (
-            <div key={idx} className="flex items-start gap-2 pl-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-purple-500 dark:bg-purple-400 mt-2 shrink-0" />
-              <span>{renderInlineChemistryNodes(itemText)}</span>
-            </div>
-          );
-        }
-
-        return <p key={idx}>{renderInlineChemistryNodes(trimmed)}</p>;
-      })}
-    </div>
-  );
-}
 
 export const ElementDetailModal: React.FC = () => {
   const {
@@ -167,9 +66,13 @@ export const ElementDetailModal: React.FC = () => {
   React.useEffect(() => {
     if (selectedElement) {
       setNoteText(notes[selectedElement.atomicNumber] || '');
-      setAiResponse(null);
     }
   }, [selectedElement, notes]);
+
+  React.useEffect(() => {
+    setAiResponse(null);
+    setAiPrompt('');
+  }, [selectedElement?.atomicNumber]);
 
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -198,6 +101,10 @@ export const ElementDetailModal: React.FC = () => {
         body: JSON.stringify({ prompt, gradeLevel, mode }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        setAiResponse(data.error || 'Failed to generate AI explanation.');
+        return;
+      }
       setAiResponse(data.result || 'No response returned.');
     } catch {
       setAiResponse('Failed to connect to AI Tutor. Please check your network connection.');
@@ -235,10 +142,10 @@ export const ElementDetailModal: React.FC = () => {
           transition={{ type: 'spring', damping: 30, stiffness: 350 }}
           className={`fixed inset-y-0 right-0 w-full ${
             activeTab === 'crystal' ? 'max-w-4xl lg:max-w-6xl' : 'max-w-2xl lg:max-w-3xl'
-          } bg-slate-950/90 border-l border-white/15 shadow-2xl flex flex-col z-10 backdrop-blur-3xl overflow-hidden transition-[max-width] duration-200`}
+          } bg-white/95 dark:bg-slate-950/90 border-l border-slate-200 dark:border-white/15 shadow-2xl flex flex-col z-10 backdrop-blur-3xl overflow-hidden transition-[max-width] duration-200`}
         >
           {/* Header Banner */}
-          <div className="p-6 border-b border-white/10 relative overflow-hidden">
+          <div className="p-6 border-b border-slate-200 dark:border-white/10 relative overflow-hidden">
             {/* Background element glow */}
             <div className={`absolute inset-0 opacity-20 ${categoryStyle.bg}`} />
             
@@ -429,95 +336,95 @@ export const ElementDetailModal: React.FC = () => {
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                     
                     {/* Atomic Number */}
-                    <div className="p-4 rounded-2xl bg-black/40 border border-white/10 shadow-sm hover:bg-white/10 transition-colors backdrop-blur-md">
-                      <span className="text-[10px] uppercase font-bold text-white/50 block mb-1">Atomic Number (Z)</span>
-                      <span className="text-base font-mono font-bold text-white">{selectedElement.atomicNumber}</span>
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm hover:bg-slate-100 dark:hover:bg-white/10 transition-colors backdrop-blur-md">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-white/50 block mb-1">Atomic Number (Z)</span>
+                      <span className="text-base font-mono font-bold text-slate-900 dark:text-white">{selectedElement.atomicNumber}</span>
                     </div>
 
                     {/* Atomic Mass */}
-                    <div className="p-4 rounded-2xl bg-black/40 border border-white/10 shadow-sm hover:bg-white/10 transition-colors backdrop-blur-md">
-                      <span className="text-[10px] uppercase font-bold text-white/50 block mb-1">Atomic Mass</span>
-                      <span className="text-base font-mono font-bold text-white">{selectedElement.atomicMass.toFixed(3)} u</span>
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm hover:bg-slate-100 dark:hover:bg-white/10 transition-colors backdrop-blur-md">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-white/50 block mb-1">Atomic Mass</span>
+                      <span className="text-base font-mono font-bold text-slate-900 dark:text-white">{selectedElement.atomicMass.toFixed(3)} u</span>
                     </div>
 
                     {/* Category */}
-                    <div className="p-4 rounded-2xl bg-black/40 border border-white/10 shadow-sm hover:bg-white/10 transition-colors backdrop-blur-md">
-                      <span className="text-[10px] uppercase font-bold text-white/50 block mb-1">Category</span>
-                      <span className="text-sm font-bold text-cyan-300 drop-shadow-sm">{CATEGORY_LABELS[selectedElement.category]}</span>
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm hover:bg-slate-100 dark:hover:bg-white/10 transition-colors backdrop-blur-md">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-white/50 block mb-1">Category</span>
+                      <span className="text-sm font-bold text-sky-700 dark:text-cyan-300">{CATEGORY_LABELS[selectedElement.category]}</span>
                     </div>
 
                     {/* Group / Period / Block */}
-                    <div className="p-4 rounded-2xl bg-black/40 border border-white/10 shadow-sm hover:bg-white/10 transition-colors backdrop-blur-md">
-                      <span className="text-[10px] uppercase font-bold text-white/50 block mb-1">Group / Period / Block</span>
-                      <span className="text-sm font-mono font-bold text-white">
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm hover:bg-slate-100 dark:hover:bg-white/10 transition-colors backdrop-blur-md">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-white/50 block mb-1">Group / Period / Block</span>
+                      <span className="text-sm font-mono font-bold text-slate-900 dark:text-white">
                         G{selectedElement.group} • P{selectedElement.period} • {selectedElement.block.toUpperCase()}-block
                       </span>
                     </div>
 
                     {/* State */}
-                    <div className="p-4 rounded-2xl bg-black/40 border border-white/10 shadow-sm hover:bg-white/10 transition-colors backdrop-blur-md">
-                      <span className="text-[10px] uppercase font-bold text-white/50 block mb-1">Standard State</span>
-                      <span className="text-sm font-bold text-emerald-400 capitalize drop-shadow-sm">{selectedElement.state}</span>
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm hover:bg-slate-100 dark:hover:bg-white/10 transition-colors backdrop-blur-md">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-white/50 block mb-1">Standard State</span>
+                      <span className="text-sm font-bold text-emerald-700 dark:text-emerald-400 capitalize">{selectedElement.state}</span>
                     </div>
 
                     {/* Electron Config */}
-                    <div className="p-4 rounded-2xl bg-black/40 border border-white/10 shadow-sm hover:bg-white/10 transition-colors backdrop-blur-md">
-                      <span className="text-[10px] uppercase font-bold text-white/50 block mb-1">Electron Configuration</span>
-                      <span className="text-sm font-mono font-bold text-cyan-300 drop-shadow-sm">{selectedElement.electronConfiguration}</span>
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm hover:bg-slate-100 dark:hover:bg-white/10 transition-colors backdrop-blur-md">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-white/50 block mb-1">Electron Configuration</span>
+                      <span className="text-sm font-mono font-bold text-sky-700 dark:text-cyan-300">{selectedElement.electronConfiguration}</span>
                     </div>
 
                     {/* Density */}
-                    <div className="p-4 rounded-2xl bg-black/40 border border-white/10 shadow-sm hover:bg-white/10 transition-colors backdrop-blur-md">
-                      <span className="text-[10px] uppercase font-bold text-white/50 block mb-1">Density</span>
-                      <span className="text-sm font-mono font-bold text-white">
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm hover:bg-slate-100 dark:hover:bg-white/10 transition-colors backdrop-blur-md">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-white/50 block mb-1">Density</span>
+                      <span className="text-sm font-mono font-bold text-slate-900 dark:text-white">
                         {selectedElement.density !== null ? `${selectedElement.density} g/cm³` : 'N/A'}
                       </span>
                     </div>
 
                     {/* Melting Point */}
-                    <div className="p-4 rounded-2xl bg-black/40 border border-white/10 shadow-sm hover:bg-white/10 transition-colors backdrop-blur-md">
-                      <span className="text-[10px] uppercase font-bold text-white/50 block mb-1">Melting Point</span>
-                      <span className="text-sm font-mono font-bold text-amber-300 drop-shadow-sm">
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm hover:bg-slate-100 dark:hover:bg-white/10 transition-colors backdrop-blur-md">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-white/50 block mb-1">Melting Point</span>
+                      <span className="text-sm font-mono font-bold text-amber-700 dark:text-amber-300">
                         {selectedElement.meltingPoint !== null ? `${selectedElement.meltingPoint} K (${(selectedElement.meltingPoint - 273.15).toFixed(1)} °C)` : 'N/A'}
                       </span>
                     </div>
 
                     {/* Boiling Point */}
-                    <div className="p-4 rounded-2xl bg-black/40 border border-white/10 shadow-sm hover:bg-white/10 transition-colors backdrop-blur-md">
-                      <span className="text-[10px] uppercase font-bold text-white/50 block mb-1">Boiling Point</span>
-                      <span className="text-sm font-mono font-bold text-rose-400 drop-shadow-sm">
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm hover:bg-slate-100 dark:hover:bg-white/10 transition-colors backdrop-blur-md">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-white/50 block mb-1">Boiling Point</span>
+                      <span className="text-sm font-mono font-bold text-rose-700 dark:text-rose-400">
                         {selectedElement.boilingPoint !== null ? `${selectedElement.boilingPoint} K (${(selectedElement.boilingPoint - 273.15).toFixed(1)} °C)` : 'N/A'}
                       </span>
                     </div>
 
                     {/* Electronegativity */}
-                    <div className="p-4 rounded-2xl bg-black/40 border border-white/10 shadow-sm hover:bg-white/10 transition-colors backdrop-blur-md">
-                      <span className="text-[10px] uppercase font-bold text-white/50 block mb-1">Electronegativity</span>
-                      <span className="text-sm font-mono font-bold text-white">
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm hover:bg-slate-100 dark:hover:bg-white/10 transition-colors backdrop-blur-md">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-white/50 block mb-1">Electronegativity</span>
+                      <span className="text-sm font-mono font-bold text-slate-900 dark:text-white">
                         {selectedElement.electronegativity !== null ? `${selectedElement.electronegativity} Pauling` : 'N/A'}
                       </span>
                     </div>
 
                     {/* Electron Affinity */}
-                    <div className="p-4 rounded-2xl bg-white/5 border border-white/10 shadow-sm hover:bg-white/10 transition-colors">
-                      <span className="text-[10px] uppercase font-bold text-white/50 block mb-1">Electron Affinity</span>
-                      <span className="text-sm font-mono font-bold text-pink-400 drop-shadow-sm">
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm hover:bg-slate-100 dark:hover:bg-white/10 transition-colors">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-white/50 block mb-1">Electron Affinity</span>
+                      <span className="text-sm font-mono font-bold text-pink-700 dark:text-pink-400">
                         {selectedElement.electronAffinity !== null ? `${selectedElement.electronAffinity} kJ/mol` : 'N/A'}
                       </span>
                     </div>
 
                     {/* Ionization Energy */}
-                    <div className="p-4 rounded-2xl bg-white/5 border border-white/10 shadow-sm hover:bg-white/10 transition-colors">
-                      <span className="text-[10px] uppercase font-bold text-white/50 block mb-1">First Ionization Energy</span>
-                      <span className="text-sm font-mono font-bold text-indigo-400 drop-shadow-sm">
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm hover:bg-slate-100 dark:hover:bg-white/10 transition-colors">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-white/50 block mb-1">First Ionization Energy</span>
+                      <span className="text-sm font-mono font-bold text-indigo-700 dark:text-indigo-400">
                         {selectedElement.ionizationEnergy !== null ? `${selectedElement.ionizationEnergy} kJ/mol` : 'N/A'}
                       </span>
                     </div>
 
                     {/* Oxidation States */}
-                    <div className="p-4 rounded-2xl bg-black/40 border border-white/10 shadow-sm hover:bg-white/10 transition-colors backdrop-blur-md">
-                      <span className="text-[10px] uppercase font-bold text-white/50 block mb-1">Oxidation States</span>
-                      <span className="text-sm font-mono font-bold text-emerald-300 drop-shadow-sm">
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm hover:bg-slate-100 dark:hover:bg-white/10 transition-colors backdrop-blur-md">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-white/50 block mb-1">Oxidation States</span>
+                      <span className="text-sm font-mono font-bold text-emerald-700 dark:text-emerald-300">
                         {selectedElement.oxidationStates && selectedElement.oxidationStates.length > 0
                           ? selectedElement.oxidationStates.map(s => (s > 0 ? `+${s}` : `${s}`)).join(', ')
                           : 'N/A'}
@@ -525,15 +432,15 @@ export const ElementDetailModal: React.FC = () => {
                     </div>
 
                     {/* Crystal Structure */}
-                    <div className="p-4 rounded-2xl bg-black/40 border border-white/10 shadow-sm hover:bg-white/10 transition-colors backdrop-blur-md">
-                      <span className="text-[10px] uppercase font-bold text-white/50 block mb-1">Crystal Structure</span>
-                      <span className="text-sm font-bold text-purple-300 drop-shadow-sm capitalize">{selectedElement.crystalStructure}</span>
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm hover:bg-slate-100 dark:hover:bg-white/10 transition-colors backdrop-blur-md">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-white/50 block mb-1">Crystal Structure</span>
+                      <span className="text-sm font-bold text-purple-700 dark:text-purple-300 capitalize">{selectedElement.crystalStructure}</span>
                     </div>
 
                     {/* Abundance Earth */}
-                    <div className="p-4 rounded-2xl bg-black/40 border border-white/10 shadow-sm hover:bg-white/10 transition-colors backdrop-blur-md">
-                      <span className="text-[10px] uppercase font-bold text-white/50 block mb-1">Crust Abundance</span>
-                      <span className="text-sm font-mono font-bold text-white">
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm hover:bg-slate-100 dark:hover:bg-white/10 transition-colors backdrop-blur-md">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-white/50 block mb-1">Crust Abundance</span>
+                      <span className="text-sm font-mono font-bold text-slate-900 dark:text-white">
                         {selectedElement.abundanceEarth !== null ? `${selectedElement.abundanceEarth} mg/kg` : 'Trace'}
                       </span>
                     </div>
@@ -544,10 +451,10 @@ export const ElementDetailModal: React.FC = () => {
                 {/* 1.5 Isotope Abundance Chart & Weighted Mass Calculator */}
                 <div className="mt-8 space-y-5">
                   <div>
-                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                      <BarChart3 className="w-4 h-4 text-emerald-400" /> Natural Isotope Abundance
+                    <h3 className="text-xs font-bold text-slate-700 dark:text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                      <BarChart3 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> Natural Isotope Abundance
                     </h3>
-                    <p className="text-xs text-slate-500 mb-4">
+                    <p className="text-xs text-slate-600 dark:text-slate-400 mb-4">
                       Verified CIAAW / IUPAC natural isotopic distribution of {selectedElement.name}.
                     </p>
                     <AbundanceChart element={selectedElement} />
@@ -557,14 +464,14 @@ export const ElementDetailModal: React.FC = () => {
                 </div>
 
                 {/* 2. Discovery Section */}
-                <div className="p-4 rounded-2xl bg-black/40 border border-white/10 shadow-sm backdrop-blur-md space-y-2">
-                  <h4 className="text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-2">
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm backdrop-blur-md space-y-2">
+                  <h4 className="text-xs font-bold text-sky-700 dark:text-cyan-400 uppercase tracking-wider flex items-center gap-2">
                     <Info className="w-4 h-4" /> Discovery & History
                   </h4>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    Discovered in <strong className="text-white font-bold">{selectedElement.discoveryYear}</strong> by{' '}
-                    <strong className="text-white font-bold">{selectedElement.discoverer}</strong>. Natural occurrence:{' '}
-                    <strong className="text-emerald-400 font-bold">{selectedElement.occurrence}</strong>.
+                  <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+                    Discovered in <strong className="text-slate-900 dark:text-white font-bold">{selectedElement.discoveryYear}</strong> by{' '}
+                    <strong className="text-slate-900 dark:text-white font-bold">{selectedElement.discoverer}</strong>. Natural occurrence:{' '}
+                    <strong className="text-emerald-700 dark:text-emerald-400 font-bold">{selectedElement.occurrence}</strong>.
                   </p>
                 </div>
 
@@ -582,8 +489,8 @@ export const ElementDetailModal: React.FC = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-center">
                   
                   {/* 2D Bohr Orbit Model */}
-                  <div className="p-6 rounded-2xl bg-black/40 border border-white/10 shadow-sm backdrop-blur-md flex flex-col items-center justify-center space-y-4">
-                    <h4 className="text-xs font-bold text-slate-300 uppercase">2D Bohr Shell Model</h4>
+                  <div className="p-6 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm backdrop-blur-md flex flex-col items-center justify-center space-y-4">
+                    <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase">2D Bohr Shell Model</h4>
                     
                     <div className="relative w-56 h-56 flex items-center justify-center">
                       {/* Central Nucleus */}
@@ -597,7 +504,7 @@ export const ElementDetailModal: React.FC = () => {
                         return (
                           <div
                             key={sIdx}
-                            className="absolute rounded-full border border-cyan-500/30 animate-spin"
+                            className="absolute rounded-full border border-sky-500/40 dark:border-cyan-500/30 animate-spin"
                             style={{
                               width: `${radius * 2}px`,
                               height: `${radius * 2}px`,
@@ -609,7 +516,7 @@ export const ElementDetailModal: React.FC = () => {
                               return (
                                 <div
                                   key={eIdx}
-                                  className="absolute w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-sm shadow-cyan-400/80 -translate-x-1/2 -translate-y-1/2"
+                                  className="absolute w-2.5 h-2.5 rounded-full bg-sky-500 dark:bg-cyan-400 shadow-sm shadow-cyan-400/80 -translate-x-1/2 -translate-y-1/2"
                                   style={{
                                     top: `${50 + 50 * Math.sin((angle * Math.PI) / 180)}%`,
                                     left: `${50 + 50 * Math.cos((angle * Math.PI) / 180)}%`,
@@ -622,14 +529,14 @@ export const ElementDetailModal: React.FC = () => {
                       })}
                     </div>
 
-                    <p className="text-xs text-slate-400 font-mono text-center">
+                    <p className="text-xs text-slate-600 dark:text-slate-400 font-mono text-center">
                       Shell Counts: [{selectedElement.bohrShells.join(', ')}]<br />Valence = {selectedElement.valenceElectrons}
                     </p>
                   </div>
 
                   {/* Lewis Dot Structure */}
-                  <div className="p-6 rounded-2xl bg-black/40 border border-white/10 shadow-sm backdrop-blur-md flex flex-col items-center justify-center space-y-4">
-                    <h4 className="text-xs font-bold text-purple-400 uppercase">Lewis Dot Structure</h4>
+                  <div className="p-6 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm backdrop-blur-md flex flex-col items-center justify-center space-y-4">
+                    <h4 className="text-xs font-bold text-purple-700 dark:text-purple-400 uppercase">Lewis Dot Structure</h4>
                     {(() => {
                       const isMainGroup =
                         selectedElement.block === 's' || selectedElement.block === 'p';
@@ -650,28 +557,28 @@ export const ElementDetailModal: React.FC = () => {
                       ];
                       return (
                         <>
-                          <div className="relative w-28 h-28 flex items-center justify-center bg-black/20 rounded-2xl border border-white/10 shadow-inner">
-                            <span className="text-3xl font-extrabold text-white">
+                          <div className="relative w-28 h-28 flex items-center justify-center bg-white dark:bg-black/25 rounded-2xl border border-slate-200 dark:border-white/10 shadow-inner">
+                            <span className="text-3xl font-extrabold text-slate-900 dark:text-white">
                               {selectedElement.symbol}
                             </span>
 
                             {Array.from({ length: Math.min(outerDots, 8) }).map((_, i) => (
                               <div
                                 key={i}
-                                className={`absolute w-3 h-3 rounded-full bg-purple-400 shadow-sm shadow-purple-400/80 ${positions[i]}`}
+                                className={`absolute w-3 h-3 rounded-full bg-purple-600 dark:bg-purple-400 shadow-sm shadow-purple-400/80 ${positions[i]}`}
                               />
                             ))}
                           </div>
 
-                          <p className="text-xs text-slate-400 text-center">
+                          <p className="text-xs text-slate-600 dark:text-slate-400 text-center">
                             {isMainGroup ? (
                               <>
-                                Shows <strong className="text-purple-300">{outerDots}</strong> outer s/p
+                                Shows <strong className="text-purple-700 dark:text-purple-300">{outerDots}</strong> outer s/p
                                 valence electrons responsible for main-group bonding.
                               </>
                             ) : (
                               <>
-                                Shows <strong className="text-purple-300">{outerDots}</strong> outer ns
+                                Shows <strong className="text-purple-700 dark:text-purple-300">{outerDots}</strong> outer ns
                                 electron(s) ({selectedElement.valenceElectrons} total{' '}
                                 {selectedElement.block}-block valence e⁻; participates in variable
                                 oxidation states [{selectedElement.oxidationStates.map((s) => (s > 0 ? `+${s}` : `${s}`)).join(', ')}]).
@@ -716,14 +623,14 @@ export const ElementDetailModal: React.FC = () => {
                 className="space-y-6"
               >
                 {/* Real-World Uses */}
-                <div className="p-4 rounded-2xl bg-black/40 border border-white/10 shadow-sm backdrop-blur-md space-y-3">
-                  <h4 className="text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-2">
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm backdrop-blur-md space-y-3">
+                  <h4 className="text-xs font-bold text-sky-700 dark:text-cyan-400 uppercase tracking-wider flex items-center gap-2">
                     <Briefcase className="w-4 h-4" /> Primary Real-World Uses
                   </h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {selectedElement.uses.map((use, i) => (
-                      <div key={i} className="flex items-center gap-2 p-2.5 rounded-xl bg-black/20 text-xs text-slate-200 border border-white/10 shadow-inner">
-                        <span className="w-2 h-2 rounded-full bg-cyan-400 shrink-0" />
+                      <div key={i} className="flex items-center gap-2 p-2.5 rounded-xl bg-white dark:bg-black/25 text-xs text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-white/10 shadow-xs">
+                        <span className="w-2 h-2 rounded-full bg-sky-500 dark:bg-cyan-400 shrink-0" />
                         <span>{use}</span>
                       </div>
                     ))}
@@ -732,30 +639,30 @@ export const ElementDetailModal: React.FC = () => {
 
                 {/* Biological & Safety */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="p-4 rounded-2xl bg-black/40 border border-white/10 shadow-sm backdrop-blur-md space-y-2">
-                    <h4 className="text-xs font-bold text-rose-400 uppercase tracking-wider flex items-center gap-2">
+                  <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm backdrop-blur-md space-y-2">
+                    <h4 className="text-xs font-bold text-rose-700 dark:text-rose-400 uppercase tracking-wider flex items-center gap-2">
                       <HeartPulse className="w-4 h-4" /> Biological Importance
                     </h4>
-                    <p className="text-xs text-slate-300 leading-relaxed">{selectedElement.biologicalImportance}</p>
+                    <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">{selectedElement.biologicalImportance}</p>
                   </div>
 
-                  <div className="p-4 rounded-2xl bg-black/40 border border-white/10 shadow-sm backdrop-blur-md space-y-2">
-                    <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-2">
+                  <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-white/10 shadow-sm backdrop-blur-md space-y-2">
+                    <h4 className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider flex items-center gap-2">
                       <ShieldAlert className="w-4 h-4" /> Safety & Handling
                     </h4>
-                    <p className="text-xs text-slate-300 leading-relaxed">{selectedElement.safety}</p>
+                    <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">{selectedElement.safety}</p>
                   </div>
                 </div>
 
                 {/* Interesting Facts */}
-                <div className="p-4 rounded-2xl bg-black/40 border border-purple-500/30 shadow-sm backdrop-blur-md space-y-3">
-                  <h4 className="text-xs font-bold text-purple-300 uppercase tracking-wider flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-purple-400" /> Interesting Chemistry Facts
+                <div className="p-4 rounded-2xl bg-purple-50/70 dark:bg-slate-900/70 border border-purple-200 dark:border-purple-500/30 shadow-sm backdrop-blur-md space-y-3">
+                  <h4 className="text-xs font-bold text-purple-800 dark:text-purple-300 uppercase tracking-wider flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-purple-600 dark:text-purple-400" /> Interesting Chemistry Facts
                   </h4>
-                  <ul className="space-y-2 text-xs text-slate-300">
+                  <ul className="space-y-2 text-xs text-slate-700 dark:text-slate-300">
                     {selectedElement.interestingFacts.map((fact, i) => (
                       <li key={i} className="flex items-start gap-2">
-                        <span className="text-purple-400 font-bold">•</span>
+                        <span className="text-purple-600 dark:text-purple-400 font-bold">•</span>
                         <span>{fact}</span>
                       </li>
                     ))}
@@ -823,7 +730,7 @@ export const ElementDetailModal: React.FC = () => {
                 {/* AI Response Box (XSS-Safe Formatted Markdown + Chemistry Subscripts) */}
                 {aiResponse && (
                   <div className="p-5 rounded-2xl bg-white dark:bg-slate-950 border border-purple-200 dark:border-purple-500/40 shadow-sm">
-                    {renderChemistryMarkdown(aiResponse)}
+                    <FormattedChemMarkdown text={aiResponse} variant="adaptive" />
                   </div>
                 )}
               </motion.div>

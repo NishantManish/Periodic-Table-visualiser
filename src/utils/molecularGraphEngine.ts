@@ -711,11 +711,62 @@ export function solveMolecularGraph3D(
     };
   });
 
-  // 3. Initial 3D Coordinate Placement via Spanning-Tree VSEPR Unit Vectors
+  // 3. Initial 3D Coordinate Placement: DFS Cycle Detection + Regular Polygon Ring Seeding + VSEPR BFS
   const coords: Array<[number, number, number]> = Array.from({ length: n }, () => [0, 0, 0]);
   const placed = new Array(n).fill(false);
 
-  // Pick central atom (highest degree) as root at (0,0,0)
+  // Helper: Find shortest fundamental rings (length 3 to 8) via BFS on each removed edge
+  const detectedRings: number[][] = [];
+  const seenRingKeys = new Set<string>();
+  for (const edge of validEdges) {
+    const start = edge.source;
+    const goal = edge.target;
+    const parent = new Array(n).fill(-1);
+    const visited = new Array(n).fill(false);
+    visited[start] = true;
+    const q: number[] = [start];
+    let found = false;
+
+    while (q.length > 0 && !found) {
+      const curr = q.shift()!;
+      for (const nb of adj[curr]) {
+        // Skip the direct edge (start, goal) to find an alternative cycle path
+        if ((curr === start && nb.to === goal) || (curr === goal && nb.to === start)) {
+          continue;
+        }
+        if (!visited[nb.to]) {
+          visited[nb.to] = true;
+          parent[nb.to] = curr;
+          if (nb.to === goal) {
+            found = true;
+            break;
+          }
+          q.push(nb.to);
+        }
+      }
+    }
+
+    if (found) {
+      const ring: number[] = [];
+      let cur = goal;
+      while (cur !== -1) {
+        ring.push(cur);
+        cur = parent[cur];
+      }
+      if (ring.length >= 3 && ring.length <= 8) {
+        const canonicalRingKey = [...ring].sort((a, b) => a - b).join('-');
+        if (!seenRingKeys.has(canonicalRingKey)) {
+          seenRingKeys.add(canonicalRingKey);
+          detectedRings.push(ring);
+        }
+      }
+    }
+  }
+
+  // Sort rings so aromatic / larger primary rings (e.g. 6-membered benzene) are seeded first
+  detectedRings.sort((a, b) => b.length - a.length);
+
+  // Pick primary central atom (highest degree) for dossier summary and acyclic root seeding
   let rootIdx = 0;
   let maxDeg = -1;
   for (let i = 0; i < n; i++) {
@@ -725,18 +776,103 @@ export function solveMolecularGraph3D(
     }
   }
 
+  const bfs: number[] = [];
+  const ringAtomSet = new Set<number>();
+
   if (n > 0) {
-    placed[rootIdx] = true;
-    coords[rootIdx] = [0, 0, 0];
-    const bfs = [rootIdx];
+    if (detectedRings.length > 0) {
+      // Seed the primary ring onto a regular 3D polygon of radius R = r_0 / (2 * sin(pi / N))
+      const primaryRing = detectedRings[0];
+      const ringSize = primaryRing.length;
+      let sumR0 = 0;
+      for (let i = 0; i < ringSize; i++) {
+        const u = primaryRing[i];
+        const v = primaryRing[(i + 1) % ringSize];
+        const e = adj[u].find((nb) => nb.to === v);
+        const uSpec = GRAPH_ELEMENT_SPECS[nodes[u].symbol] || GRAPH_ELEMENT_SPECS['C'];
+        const vSpec = GRAPH_ELEMENT_SPECS[nodes[v].symbol] || GRAPH_ELEMENT_SPECS['C'];
+        const shrink =
+          e && e.order === 3 ? 0.80 : e && e.order === 2 ? 0.88 : e && e.order >= 1.33 ? 0.92 : 1.0;
+        sumR0 += (uSpec.covalentRadiusAngstrom + vSpec.covalentRadiusAngstrom) * shrink;
+      }
+      const avgR0 = sumR0 / ringSize;
+      const polyRadius = avgR0 / (2 * Math.sin(Math.PI / ringSize));
+
+      const allSp3 = primaryRing.every((idx) => atomDiagnostics[idx].hybridization === 'sp³');
+      for (let i = 0; i < ringSize; i++) {
+        const idx = primaryRing[i];
+        const theta = (2 * Math.PI * i) / ringSize;
+        // Gentle chair puckering for saturated 6-membered sp³ rings (cyclohexane); planar for sp² / aromatic rings
+        const puckerZ = allSp3 && ringSize === 6 ? (i % 2 === 0 ? 0.24 : -0.24) : 0;
+        coords[idx] = [
+          polyRadius * Math.cos(theta),
+          polyRadius * Math.sin(theta),
+          puckerZ,
+        ];
+        placed[idx] = true;
+        ringAtomSet.add(idx);
+        bfs.push(idx);
+      }
+
+      // Mark additional fused/secondary ring atoms for tracking
+      for (let r = 1; r < detectedRings.length; r++) {
+        detectedRings[r].forEach((idx) => ringAtomSet.add(idx));
+      }
+    } else {
+      placed[rootIdx] = true;
+      coords[rootIdx] = [0, 0, 0];
+      bfs.push(rootIdx);
+    }
 
     while (bfs.length > 0) {
       const u = bfs.shift()!;
       const uDiag = atomDiagnostics[u];
       const uSpec = GRAPH_ELEMENT_SPECS[nodes[u].symbol] || GRAPH_ELEMENT_SPECS['C'];
-      const dirs = getIdealVseprUnitVectors(Math.max(uDiag.stericNumber, adj[u].length));
+      const candidateDirs = getIdealVseprUnitVectors(Math.max(uDiag.stericNumber, adj[u].length));
 
-      let dirCursor = 0;
+      // Collect unit vectors to already-placed neighbors so new substituents point cleanly outward
+      const existingDirs: Array<[number, number, number]> = [];
+      for (const nb of adj[u]) {
+        if (placed[nb.to]) {
+          const dx = coords[nb.to][0] - coords[u][0];
+          const dy = coords[nb.to][1] - coords[u][1];
+          const dz = coords[nb.to][2] - coords[u][2];
+          const len = Math.hypot(dx, dy, dz) || 1;
+          existingDirs.push([dx / len, dy / len, dz / len]);
+        }
+      }
+
+      // If u is on a ring with 2 placed ring neighbors, add explicit outward radial bisector candidate
+      const augmentedCandidates: Array<[number, number, number]> = [...candidateDirs];
+      if (existingDirs.length >= 2) {
+        const bx = -(existingDirs[0][0] + existingDirs[1][0]);
+        const by = -(existingDirs[0][1] + existingDirs[1][1]);
+        const bz = -(existingDirs[0][2] + existingDirs[1][2]);
+        const bLen = Math.hypot(bx, by, bz);
+        if (bLen > 0.1) {
+          const ux = bx / bLen;
+          const uy = by / bLen;
+          const uz = bz / bLen;
+          if (uDiag.hybridization.startsWith('sp²')) {
+            augmentedCandidates.unshift([ux, uy, uz]);
+          } else {
+            // For sp³ ring carbons, project two normalized exocyclic substituents above and below the ring plane
+            const upX = ux * 0.82;
+            const upY = uy * 0.82;
+            const upZ = uz * 0.82 + 0.57;
+            const upLen = Math.hypot(upX, upY, upZ) || 1;
+            const dnX = ux * 0.82;
+            const dnY = uy * 0.82;
+            const dnZ = uz * 0.82 - 0.57;
+            const dnLen = Math.hypot(dnX, dnY, dnZ) || 1;
+            augmentedCandidates.unshift([upX / upLen, upY / upLen, upZ / upLen]);
+            augmentedCandidates.unshift([dnX / dnLen, dnY / dnLen, dnZ / dnLen]);
+          }
+        }
+      }
+
+      const usedDirs: Array<[number, number, number]> = [...existingDirs];
+
       for (const nb of adj[u]) {
         const v = nb.to;
         if (placed[v]) continue;
@@ -746,15 +882,27 @@ export function solveMolecularGraph3D(
           nb.order === 3 ? 0.80 : nb.order === 2 ? 0.88 : nb.order >= 1.33 ? 0.92 : 1.0;
         const r0 = (uSpec.covalentRadiusAngstrom + vSpec.covalentRadiusAngstrom) * bondShrink;
 
-        const d = dirs[dirCursor % dirs.length];
-        dirCursor++;
+        // Pick candidate direction that minimizes maximum dot product with already-occupied bond vectors
+        let bestDir = augmentedCandidates[0];
+        let bestMaxDot = Infinity;
+        for (const cand of augmentedCandidates) {
+          let maxDot = -1;
+          for (const occ of usedDirs) {
+            const dot = cand[0] * occ[0] + cand[1] * occ[1] + cand[2] * occ[2];
+            if (dot > maxDot) maxDot = dot;
+          }
+          if (maxDot < bestMaxDot) {
+            bestMaxDot = maxDot;
+            bestDir = cand;
+          }
+        }
 
-        // Slight deterministic staggered offset for multi-center chains
-        const stagger = u === rootIdx ? 0 : (u % 2 === 0 ? 1 : -1) * 0.16;
+        usedDirs.push(bestDir);
+        const stagger = ringAtomSet.has(u) ? 0 : (u % 2 === 0 ? 1 : -1) * 0.12;
         coords[v] = [
-          coords[u][0] + d[0] * r0,
-          coords[u][1] + d[1] * r0 + stagger,
-          coords[u][2] + d[2] * r0,
+          coords[u][0] + bestDir[0] * r0,
+          coords[u][1] + bestDir[1] * r0 + stagger,
+          coords[u][2] + bestDir[2] * r0,
         ];
         placed[v] = true;
         bfs.push(v);
@@ -890,6 +1038,70 @@ export function solveMolecularGraph3D(
             forces[j][0] += rx;
             forces[j][1] += ry;
             forces[j][2] += rz;
+          }
+        }
+      }
+
+      // (d) π-Bond & Conjugated Ring Coplanarity Projection (E_torsion for sp² double/aromatic bonds)
+      const kPiPlane = 0.22;
+      for (const edge of validEdges) {
+        if (edge.order < 1.33 || edge.order > 2.2) continue;
+        const u = edge.source;
+        const v = edge.target;
+        const uIsSp2 = atomDiagnostics[u].hybridization.startsWith('sp²');
+        const vIsSp2 = atomDiagnostics[v].hybridization.startsWith('sp²');
+        if (!uIsSp2 && !vIsSp2) continue;
+
+        const bx = coords[v][0] - coords[u][0];
+        const by = coords[v][1] - coords[u][1];
+        const bz = coords[v][2] - coords[u][2];
+
+        // Gather direct neighbors of u and v that must lie in the π nodal plane
+        const planeMembers = new Set<number>([u, v]);
+        for (const nb of adj[u]) planeMembers.add(nb.to);
+        for (const nb of adj[v]) planeMembers.add(nb.to);
+
+        // Compute best plane normal from bond axis × substituent vector
+        let nx = 0;
+        let ny = 0;
+        let nz = 0;
+        let maxCrossSq = 0;
+        for (const mIdx of planeMembers) {
+          if (mIdx === u || mIdx === v) continue;
+          const vx = coords[mIdx][0] - coords[u][0];
+          const vy = coords[mIdx][1] - coords[u][1];
+          const vz = coords[mIdx][2] - coords[u][2];
+          const cx = by * vz - bz * vy;
+          const cy = bz * vx - bx * vz;
+          const cz = bx * vy - by * vx;
+          const magSq = cx * cx + cy * cy + cz * cz;
+          if (magSq > maxCrossSq) {
+            maxCrossSq = magSq;
+            nx = cx;
+            ny = cy;
+            nz = cz;
+          }
+        }
+
+        if (maxCrossSq > 1e-4) {
+          const nLen = Math.sqrt(maxCrossSq);
+          nx /= nLen;
+          ny /= nLen;
+          nz /= nLen;
+
+          // Project out-of-plane deviations gently back toward the shared sp² plane through midpoint
+          const mx = (coords[u][0] + coords[v][0]) * 0.5;
+          const my = (coords[u][1] + coords[v][1]) * 0.5;
+          const mz = (coords[u][2] + coords[v][2]) * 0.5;
+
+          for (const mIdx of planeMembers) {
+            const distFromPlane =
+              (coords[mIdx][0] - mx) * nx +
+              (coords[mIdx][1] - my) * ny +
+              (coords[mIdx][2] - mz) * nz;
+            forces[mIdx][0] -= distFromPlane * nx * kPiPlane;
+            forces[mIdx][1] -= distFromPlane * ny * kPiPlane;
+            forces[mIdx][2] -= distFromPlane * nz * kPiPlane;
           }
         }
       }
@@ -1100,3 +1312,45 @@ export function solveMolecularGraph3D(
     ihd,
   };
 }
+
+/**
+ * Compute a permutation-invariant canonical topological graph signature using
+ * 2-round Weisfeiler-Lehman (Morgan) neighborhood refinement.
+ * Accurately distinguishes constitutional isomers sharing the exact same molecular formula
+ * (e.g., Ethanol C-C-O-H vs. Dimethyl Ether C-O-C, Acetone vs. Propanal, n-Butane vs. Isobutane).
+ */
+export function computeCanonicalTopologySignature(
+  atoms: Array<{ symbol: string }>,
+  bonds: Array<{ source: number; target: number; order: number }>
+): string {
+  const n = atoms.length;
+  if (n === 0) return '';
+
+  const adj: Array<Array<{ to: number; orderKey: number }>> = Array.from({ length: n }, () => []);
+  for (const b of bonds) {
+    if (b.source < 0 || b.target < 0 || b.source >= n || b.target >= n || b.source === b.target) {
+      continue;
+    }
+    const orderKey = Math.round(b.order * 10);
+    adj[b.source].push({ to: b.target, orderKey });
+    adj[b.target].push({ to: b.source, orderKey });
+  }
+
+  let labels = atoms.map((a, idx) => {
+    const boSum = adj[idx].reduce((acc, nb) => acc + nb.orderKey, 0);
+    return `${a.symbol}:${adj[idx].length}:${boSum}`;
+  });
+
+  for (let round = 0; round < 2; round++) {
+    labels = labels.map((selfLabel, idx) => {
+      const neighborTokens = adj[idx]
+        .map((nb) => `${nb.orderKey}-${labels[nb.to]}`)
+        .sort()
+        .join(',');
+      return `${selfLabel}(${neighborTokens})`;
+    });
+  }
+
+  return [...labels].sort().join('|');
+}
+

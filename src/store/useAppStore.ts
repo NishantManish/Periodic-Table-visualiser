@@ -307,6 +307,20 @@ export const useAppStore = create<AppState>()(
         const nextXp = typeof backup.xp === 'number' && backup.xp >= 0 ? Math.floor(backup.xp) : get().xp;
         const nextLevel = Math.floor(nextXp / 200) + 1;
 
+        const ALLOWED_GRADE_LEVELS: GradeLevel[] = [
+          'Grade 5',
+          'Grade 8',
+          'Grade 10',
+          'CBSE/ICSE',
+          'JEE/NEET',
+          'University',
+        ];
+        const validGradeLevel =
+          typeof backup.gradeLevel === 'string' &&
+          ALLOWED_GRADE_LEVELS.includes(backup.gradeLevel as GradeLevel)
+            ? (backup.gradeLevel as GradeLevel)
+            : get().gradeLevel;
+
         set({
           xp: nextXp,
           level: typeof backup.level === 'number' && backup.level >= 1 ? backup.level : nextLevel,
@@ -318,7 +332,7 @@ export const useAppStore = create<AppState>()(
             ? backup.masteredFlashcards.filter((s) => typeof s === 'string')
             : get().masteredFlashcards,
           achievements: reconciledAchievements,
-          gradeLevel: backup.gradeLevel || get().gradeLevel,
+          gradeLevel: validGradeLevel,
         });
       },
 

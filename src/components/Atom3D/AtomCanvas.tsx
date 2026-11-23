@@ -67,11 +67,13 @@ const Nucleus = ({
   atomicMass,
   isPlaying,
   speed,
+  renderStyle,
 }: {
   atomicNumber: number;
   atomicMass: number;
   isPlaying: boolean;
   speed: number;
+  renderStyle: AtomRenderStyle;
 }) => {
   const groupRef = useRef<THREE.Group>(null);
   const protonMeshRef = useRef<THREE.InstancedMesh>(null);
@@ -168,25 +170,60 @@ const Nucleus = ({
     }
   });
 
+  const isWireframe = renderStyle === 'wireframe';
+  const isNeon = renderStyle === 'neon';
+  const isXray = renderStyle === 'xray';
+
   return (
     <group ref={groupRef}>
-      <instancedMesh ref={protonMeshRef} args={[undefined, undefined, numProtons]}>
+      <instancedMesh
+        key={`p-${numProtons}`}
+        ref={protonMeshRef}
+        args={[undefined, undefined, numProtons]}
+        frustumCulled={false}
+      >
         <sphereGeometry args={[0.25, 16, 16]} />
-        <meshStandardMaterial
-          color="#ef4444"
-          roughness={0.3}
-          metalness={0.2}
-          emissive="#ef4444"
-          emissiveIntensity={0.25}
+        <meshPhysicalMaterial
+          key={renderStyle}
+          color={isXray ? '#38bdf8' : isNeon ? '#ff2e63' : '#ef4444'}
+          roughness={isNeon ? 0.12 : 0.26}
+          metalness={isXray ? 0.05 : 0.3}
+          clearcoat={renderStyle === 'realistic' ? 0.75 : 0.2}
+          emissive={isXray ? '#0ea5e9' : isNeon ? '#ff2e63' : '#ef4444'}
+          emissiveIntensity={isNeon ? 2.0 : isXray ? 1.15 : 0.25}
+          wireframe={isWireframe}
+          transparent={isXray}
+          opacity={isXray ? 0.36 : 1}
+          depthWrite={!isXray}
         />
       </instancedMesh>
       {numNeutrons > 0 && (
-        <instancedMesh ref={neutronMeshRef} args={[undefined, undefined, numNeutrons]}>
+        <instancedMesh
+          key={`n-${numNeutrons}`}
+          ref={neutronMeshRef}
+          args={[undefined, undefined, numNeutrons]}
+          frustumCulled={false}
+        >
           <sphereGeometry args={[0.25, 16, 16]} />
-          <meshStandardMaterial color="#64748b" roughness={0.4} metalness={0.2} />
+          <meshPhysicalMaterial
+            key={renderStyle}
+            color={isXray ? '#7dd3fc' : isNeon ? '#38bdf8' : renderStyle === 'bohr' ? '#cbd5e1' : '#64748b'}
+            roughness={0.35}
+            metalness={isXray ? 0.05 : 0.25}
+            emissive={isXray ? '#0284c7' : isNeon ? '#0284c7' : '#000000'}
+            emissiveIntensity={isNeon ? 0.9 : isXray ? 0.65 : 0}
+            wireframe={isWireframe}
+            transparent={isXray}
+            opacity={isXray ? 0.28 : 1}
+            depthWrite={!isXray}
+          />
         </instancedMesh>
       )}
-      <pointLight color="#ef4444" intensity={1.5} distance={6} />
+      <pointLight
+        color={isXray ? '#38bdf8' : isNeon ? '#ff2e63' : '#ef4444'}
+        intensity={isNeon ? 2.6 : 1.5}
+        distance={isNeon ? 9 : 6}
+      />
     </group>
   );
 };
@@ -198,10 +235,12 @@ const ParametricHarmonicMesh = ({
   orbital,
   scale,
   opacity = 0.58,
+  renderStyle = 'realistic',
 }: {
   orbital: SpecificOrbitalSubshell;
   scale: number;
   opacity?: number;
+  renderStyle?: AtomRenderStyle;
 }) => {
   const geometry = useMemo(
     () => buildSphericalHarmonicGeometry(orbital, scale),
@@ -214,17 +253,24 @@ const ParametricHarmonicMesh = ({
     };
   }, [geometry]);
 
+  const isWireframe = renderStyle === 'wireframe';
+  const isXray = renderStyle === 'xray';
+  const isNeon = renderStyle === 'neon';
+
   return (
     <mesh geometry={geometry}>
       <meshPhysicalMaterial
+        key={renderStyle}
         vertexColors
         transparent
-        opacity={opacity}
-        roughness={0.18}
+        opacity={isXray ? Math.min(opacity, 0.26) : isNeon ? Math.min(0.82, opacity + 0.18) : opacity}
+        roughness={isNeon ? 0.08 : 0.18}
         metalness={0.1}
-        clearcoat={0.75}
+        clearcoat={isNeon ? 1.0 : 0.75}
         side={THREE.DoubleSide}
         depthWrite={false}
+        wireframe={isWireframe}
+        blending={isNeon ? THREE.AdditiveBlending : THREE.NormalBlending}
       />
     </mesh>
   );
@@ -249,7 +295,7 @@ const QuantumProbabilityCloud = ({
 
   return (
     <points>
-      <bufferGeometry>
+      <bufferGeometry key={`${orbital}-${principalN}-${scale}`}>
         <bufferAttribute
           attach="attributes-position"
           count={positions.length / 3}
@@ -285,6 +331,7 @@ const QuantumOrbitals = ({
   showNodalPlanes = false,
   isPlaying,
   speed,
+  renderStyle,
 }: {
   element: ElementData;
   orbitalType: QuantumOrbitalType;
@@ -292,6 +339,7 @@ const QuantumOrbitals = ({
   showNodalPlanes?: boolean;
   isPlaying: boolean;
   speed: number;
+  renderStyle: AtomRenderStyle;
 }) => {
   const groupRef = useRef<THREE.Group>(null);
 
@@ -326,9 +374,15 @@ const QuantumOrbitals = ({
                   <meshPhysicalMaterial
                     color={isPositivePhase ? '#38bdf8' : '#f43f5e'}
                     transparent
-                    opacity={orbitalType === 's' ? 0.24 - idx * 0.04 : 0.12}
+                    opacity={
+                      renderStyle === 'xray'
+                        ? 0.1
+                        : orbitalType === 's'
+                        ? 0.24 - idx * 0.04
+                        : 0.12
+                    }
                     roughness={0.2}
-                    wireframe={idx > 0 && orbitalType === 'all'}
+                    wireframe={renderStyle === 'wireframe' || (idx > 0 && orbitalType === 'all')}
                     depthWrite={false}
                   />
                 </Sphere>
@@ -336,46 +390,51 @@ const QuantumOrbitals = ({
             })}
 
           {/* p-Orbitals (pz, px, py) */}
-          {orbitalType === 'pz' && <ParametricHarmonicMesh orbital="pz" scale={5.2} />}
-          {orbitalType === 'px' && <ParametricHarmonicMesh orbital="px" scale={5.2} />}
-          {orbitalType === 'py' && <ParametricHarmonicMesh orbital="py" scale={5.2} />}
+          {orbitalType === 'pz' && <ParametricHarmonicMesh orbital="pz" scale={5.2} renderStyle={renderStyle} />}
+          {orbitalType === 'px' && <ParametricHarmonicMesh orbital="px" scale={5.2} renderStyle={renderStyle} />}
+          {orbitalType === 'py' && <ParametricHarmonicMesh orbital="py" scale={5.2} renderStyle={renderStyle} />}
           {(orbitalType === 'p' || (orbitalType === 'all' && hasP)) && (
             <group>
               <ParametricHarmonicMesh
                 orbital="pz"
                 scale={4.8}
                 opacity={orbitalType === 'p' ? 0.55 : 0.35}
+                renderStyle={renderStyle}
               />
               <ParametricHarmonicMesh
                 orbital="px"
                 scale={4.8}
                 opacity={orbitalType === 'p' ? 0.55 : 0.35}
+                renderStyle={renderStyle}
               />
               <ParametricHarmonicMesh
                 orbital="py"
                 scale={4.8}
                 opacity={orbitalType === 'p' ? 0.55 : 0.35}
+                renderStyle={renderStyle}
               />
             </group>
           )}
 
           {/* d-Orbitals (dz2, dx2-y2, dxy, dxz, dyz) */}
-          {orbitalType === 'dz2' && <ParametricHarmonicMesh orbital="dz2" scale={5.6} />}
-          {orbitalType === 'dx2-y2' && <ParametricHarmonicMesh orbital="dx2-y2" scale={5.6} />}
-          {orbitalType === 'dxy' && <ParametricHarmonicMesh orbital="dxy" scale={5.6} />}
-          {orbitalType === 'dxz' && <ParametricHarmonicMesh orbital="dxz" scale={5.6} />}
-          {orbitalType === 'dyz' && <ParametricHarmonicMesh orbital="dyz" scale={5.6} />}
+          {orbitalType === 'dz2' && <ParametricHarmonicMesh orbital="dz2" scale={5.6} renderStyle={renderStyle} />}
+          {orbitalType === 'dx2-y2' && <ParametricHarmonicMesh orbital="dx2-y2" scale={5.6} renderStyle={renderStyle} />}
+          {orbitalType === 'dxy' && <ParametricHarmonicMesh orbital="dxy" scale={5.6} renderStyle={renderStyle} />}
+          {orbitalType === 'dxz' && <ParametricHarmonicMesh orbital="dxz" scale={5.6} renderStyle={renderStyle} />}
+          {orbitalType === 'dyz' && <ParametricHarmonicMesh orbital="dyz" scale={5.6} renderStyle={renderStyle} />}
           {(orbitalType === 'd' || (orbitalType === 'all' && hasD)) && (
             <group>
               <ParametricHarmonicMesh
                 orbital="dz2"
                 scale={5.4}
                 opacity={orbitalType === 'd' ? 0.56 : 0.38}
+                renderStyle={renderStyle}
               />
               <ParametricHarmonicMesh
                 orbital="dx2-y2"
                 scale={5.2}
                 opacity={orbitalType === 'd' ? 0.45 : 0.28}
+                renderStyle={renderStyle}
               />
             </group>
           )}
@@ -386,6 +445,7 @@ const QuantumOrbitals = ({
               orbital="f"
               scale={6.0}
               opacity={orbitalType === 'f' ? 0.58 : 0.36}
+              renderStyle={renderStyle}
             />
           )}
         </>
@@ -449,6 +509,7 @@ const ElectronShell = ({
   speed,
   showShells,
   showLabels,
+  renderStyle,
 }: {
   shellIndex: number;
   electronCount: number;
@@ -458,17 +519,22 @@ const ElectronShell = ({
   speed: number;
   showShells: boolean;
   showLabels: boolean;
+  renderStyle: AtomRenderStyle;
 }) => {
   const groupRef = useRef<THREE.Group>(null);
 
   const tilt = useMemo(() => {
+    // Classic textbook Bohr mode: coplanar concentric circular shells
+    if (renderStyle === 'bohr') {
+      return new THREE.Euler(0, 0, 0);
+    }
     const angle = (shellIndex * Math.PI) / 6;
     return new THREE.Euler(
       Math.sin(angle) * 0.35,
       Math.cos(angle) * 0.35,
       (shellIndex % 2 === 0 ? 1 : -1) * 0.2
     );
-  }, [shellIndex]);
+  }, [shellIndex, renderStyle]);
 
   useFrame((_, delta) => {
     if (isPlaying && groupRef.current) {
@@ -490,11 +556,28 @@ const ElectronShell = ({
     return arr;
   }, [electronCount, radius]);
 
+  const isNeon = renderStyle === 'neon';
+  const isWireframe = renderStyle === 'wireframe';
+  const isXray = renderStyle === 'xray';
+  const isBohr = renderStyle === 'bohr';
+
+  const ringColor = isXray ? '#7dd3fc' : color;
+  const ringOpacity = isNeon ? 0.82 : isBohr ? 0.62 : isXray ? 0.24 : 0.32;
+  const ringTube = isNeon ? 0.036 : isBohr ? 0.032 : 0.025;
+
   return (
     <group rotation={tilt}>
       {showShells && (
-        <Torus args={[radius, 0.025, 16, 100]}>
-          <meshBasicMaterial color={color} transparent opacity={0.32} />
+        <Torus args={[radius, ringTube, 16, 100]}>
+          <meshBasicMaterial
+            key={renderStyle}
+            color={ringColor}
+            transparent
+            opacity={ringOpacity}
+            wireframe={isWireframe}
+            depthWrite={!isXray}
+            blending={isNeon ? THREE.AdditiveBlending : THREE.NormalBlending}
+          />
         </Torus>
       )}
 
@@ -502,7 +585,7 @@ const ElectronShell = ({
         <Html position={[radius, 0, 0]} center distanceFactor={15}>
           <div
             className="px-1.5 py-0.5 rounded bg-slate-900/90 border text-[10px] font-mono whitespace-nowrap pointer-events-none select-none shadow-md"
-            style={{ borderColor: `${color}66`, color }}
+            style={{ borderColor: `${ringColor}66`, color: ringColor }}
           >
             {SHELL_NAMES[shellIndex]} (n={shellIndex + 1}): {electronCount}e⁻
           </div>
@@ -512,17 +595,33 @@ const ElectronShell = ({
       <group ref={groupRef}>
         {electrons.map((el) => (
           <group key={el.id} position={[el.x, el.y, 0]}>
-            <Sphere args={[0.14, 16, 16]}>
-              <meshStandardMaterial
-                color={color}
-                emissive={color}
-                emissiveIntensity={1.6}
-                roughness={0.1}
+            <Sphere args={[isNeon ? 0.16 : 0.14, 16, 16]}>
+              <meshPhysicalMaterial
+                key={renderStyle}
+                color={isXray ? '#bae6fd' : color}
+                emissive={isXray ? '#38bdf8' : color}
+                emissiveIntensity={isNeon ? 2.6 : isXray ? 1.3 : renderStyle === 'realistic' ? 0.85 : 1.5}
+                roughness={renderStyle === 'realistic' ? 0.14 : 0.1}
+                metalness={renderStyle === 'realistic' ? 0.45 : 0.1}
+                clearcoat={renderStyle === 'realistic' ? 0.85 : 0.2}
+                wireframe={isWireframe}
+                transparent={isXray}
+                opacity={isXray ? 0.45 : 1}
+                depthWrite={!isXray}
               />
             </Sphere>
-            <Sphere args={[0.26, 12, 12]}>
-              <meshBasicMaterial color={color} transparent opacity={0.25} />
-            </Sphere>
+            {!isWireframe && (
+              <Sphere args={[isNeon ? 0.34 : 0.26, 12, 12]}>
+                <meshBasicMaterial
+                  key={renderStyle}
+                  color={isXray ? '#38bdf8' : color}
+                  transparent
+                  opacity={isNeon ? 0.42 : isXray ? 0.18 : 0.25}
+                  depthWrite={false}
+                  blending={isNeon ? THREE.AdditiveBlending : THREE.NormalBlending}
+                />
+              </Sphere>
+            )}
           </group>
         ))}
       </group>
@@ -632,6 +731,7 @@ export const AtomCanvas = React.forwardRef<AtomCanvasRef, AtomCanvasProps>(
               atomicMass={element.atomicMass}
               isPlaying={isPlaying}
               speed={effectiveSpeed}
+              renderStyle={renderStyle}
             />
           )}
 
@@ -647,6 +747,7 @@ export const AtomCanvas = React.forwardRef<AtomCanvasRef, AtomCanvasProps>(
                 speed={effectiveSpeed}
                 showShells={showShells}
                 showLabels={showLabels}
+                renderStyle={renderStyle}
               />
             ))
           ) : (
@@ -657,6 +758,7 @@ export const AtomCanvas = React.forwardRef<AtomCanvasRef, AtomCanvasProps>(
               showNodalPlanes={showNodalPlanes}
               isPlaying={isPlaying}
               speed={effectiveSpeed}
+              renderStyle={renderStyle}
             />
           )}
         </Canvas>

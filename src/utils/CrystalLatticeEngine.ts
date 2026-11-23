@@ -430,26 +430,36 @@ export function expandSupercell(
   }
 
   // Compute nearest-neighbor coordination bonds
+  // For non-HCP crystal systems (especially anisotropic Orthorhombic where a ≠ b ≠ c),
+  // compute nearest neighbors in unit-cell fractional space so bonds along b and c axes
+  // are never dropped by a single Euclidean cutoff.
   const bonds: Array<[[number, number, number], [number, number, number]]> = [];
+  const useFractionalMetric = system !== 'HCP';
+
+  const pairDist = (a: LatticeSite, b: LatticeSite): number => {
+    const p1 = useFractionalMetric ? a.fractional : a.pos;
+    const p2 = useFractionalMetric ? b.fractional : b.pos;
+    const dx = p1[0] - p2[0];
+    const dy = p1[1] - p2[1];
+    const dz = p1[2] - p2[2];
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  };
+
   let minPairDist = Infinity;
   for (let i = 0; i < sites.length; i++) {
     for (let j = i + 1; j < sites.length; j++) {
-      const dx = sites[i].pos[0] - sites[j].pos[0];
-      const dy = sites[i].pos[1] - sites[j].pos[1];
-      const dz = sites[i].pos[2] - sites[j].pos[2];
-      const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      if (d > 0.1 && d < minPairDist) minPairDist = d;
+      const d = pairDist(sites[i], sites[j]);
+      if (d > 0.05 && d < minPairDist) minPairDist = d;
     }
   }
 
-  const cutoff = minPairDist * 1.16;
+  // 1.08x tolerance captures all true nearest neighbors (including HCP in-plane vs inter-plane ratio ~1.045)
+  // while excluding BCC's second-nearest cube-edge neighbors (1.0 / 0.866 = 1.155).
+  const cutoff = minPairDist * 1.08;
   for (let i = 0; i < sites.length; i++) {
     for (let j = i + 1; j < sites.length; j++) {
-      const dx = sites[i].pos[0] - sites[j].pos[0];
-      const dy = sites[i].pos[1] - sites[j].pos[1];
-      const dz = sites[i].pos[2] - sites[j].pos[2];
-      const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      if (d <= cutoff) {
+      const d = pairDist(sites[i], sites[j]);
+      if (d > 0.05 && d <= cutoff) {
         bonds.push([sites[i].pos, sites[j].pos]);
       }
     }
@@ -598,7 +608,12 @@ export function computeCustomMillerPlane(
   }
 
   // Note: Three.js coordinate mapping used in LatticeScene has crystal axes (a, b, c) aligned to (x, z, y)
-  const rawNormal = new THREE.Vector3(h, l, k).normalize();
+  // For anisotropic Orthorhombic cells (sx=0.85, sy=1.22, sz=0.96), use reciprocal lattice normal (h/sx, l/sy, k/sz).
+  const rawNormal = (
+    system === 'Orthorhombic'
+      ? new THREE.Vector3(h / 0.85, l / 1.22, k / 0.96)
+      : new THREE.Vector3(h, l, k)
+  ).normalize();
   const q = new THREE.Quaternion().setFromUnitVectors(
     new THREE.Vector3(0, 0, 1),
     rawNormal
